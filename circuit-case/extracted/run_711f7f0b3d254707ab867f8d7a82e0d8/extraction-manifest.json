@@ -1,0 +1,52 @@
+{
+  "case_input": {
+    "measurements.csv": "blob://989877f07a97ac4aeb7c3949c0db9ccd31307731e9ec933843990649769e348f",
+    "symptoms.md": "blob://356fa1b8d66f30c583200abce2aeeef63623c07dc40244a3cde45c0be0c068b4"
+  },
+  "images": [
+    {
+      "dpi": 300,
+      "evidence_ref": "blob://ee0c42bea31ca0172e7333b79a1c259e916b6f1946826a2ac0045254cfc0acfe",
+      "label": "full",
+      "page": 44,
+      "path": "extracted/page-044/full.png",
+      "region": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "sha256": "sha256:ee0c42bea31ca0172e7333b79a1c259e916b6f1946826a2ac0045254cfc0acfe"
+    },
+    {
+      "dpi": 600,
+      "evidence_ref": "blob://aee59c2379c39f6bc6c7025f03ecc76767783b894c7683a56af28add5417b9b9",
+      "label": "region",
+      "page": 44,
+      "path": "extracted/page-044/region.png",
+      "region": [
+        0.0,
+        0.5,
+        0.5,
+        1.0
+      ],
+      "sha256": "sha256:aee59c2379c39f6bc6c7025f03ecc76767783b894c7683a56af28add5417b9b9"
+    }
+  ],
+  "manifest_ref": "blob://ffae41bcaa12176914619171d1ea7bae17375922086add67b3899d2c16026bb8",
+  "page": 44,
+  "page_convention": "one-based PDF page, not printed page label",
+  "page_count": 83,
+  "pdf_filename": "nak_Dragon_Service_Manual_hi_res.pdf",
+  "pdf_hash": "sha256:c107c4caeb88baea77fbcfc30caf7624b92d2a0136f63e7e6c98f93dc4bc022f",
+  "schema_version": 1,
+  "source_chunks": [
+    "blob://27d59851cc6e2455cdcc925aa267fa064e91df47532d885272d12d67462a7aa2",
+    "blob://5b31da1e64a824f6dadf4a85fed1efc5e6d474e7915093255f355197d844ab6a",
+    "blob://b613f16d19f2e3758af75dcf29221da0eeeb753500a503bd7e381d78ba1e9860",
+    "blob://7700b894ceef3b04eca0523021a914c19d782bcc476a8720bdff1018b91d21bb",
+    "blob://51b63cfc2518b10fdef9edc75812dee47b414d3648941deb18335640c09d8ced"
+  ],
+  "text_path": "extracted/page-044/text.txt",
+  "text_ref": "blob://ef6cbd2161eaea7943ce8693b9824d23d1793ffb1c0fca05b600d3899b44c977"
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+uv="$(command -v uv)" || uv="/home/ruthvik/.local/bin/uv"
+[[ -x "$uv" ]] || { echo "uv not found" >&2; exit 127; }
+exec "$uv" run --locked --project "$root" local-agent-mcp "$@"

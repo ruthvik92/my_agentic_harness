@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Agent Screenshot Chat</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 10px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; font-size: 1.2rem; margin: 0 0 10px 0; }
+        .pairing { text-align: center; margin-bottom: 15px; font-size: 0.9em; color: #555; }
+        .pairing code { background: #eee; padding: 4px 8px; border-radius: 4px; font-family: monospace; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 4px; font-weight: 500; color: #333; font-size: 0.9em; }
+        textarea, input[type="file"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
+        textarea { height: 80px; resize: vertical; }
+        .preview { margin-top: 8px; text-align: center; }
+        .preview img { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; }
+        .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+        button { flex: 1; padding: 10px; border: none; border-radius: 4px; font-size: 0.9em; cursor: pointer; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-secondary:hover { background: #5a6268; }
+        .btn-secondary:disabled { background: #ccc; cursor: not-allowed; }
+        .status { margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px; font-size: 0.85em; color: #555; }
+        .status.running { background: #e6f7ff; color: #0050b3; }
+        .status.completed { background: #e6f7e6; color: #006400; }
+        .status.failed { background: #ffe6e6; color: #b30000; }
+        .status.error { background: #fff3cd; color: #856404; }
+        .transcript { margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px; }
+        .transcript-item { margin-bottom: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .transcript-item.user { color: #0056b3; }
+        .transcript-item.assistant { color: #333; white-space: normal; border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+        .transcript-item.assistant > summary { cursor: pointer; font-weight: 600; line-height: 1.5; }
+        .reply-preview { display: block; color: #666; font-size: .8em; font-weight: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .transcript-item.assistant[open] .reply-preview { display: none; }
+        .markdown-content { line-height: 1.5; overflow-wrap: anywhere; }
+        .markdown-content h1 { text-align: left; font-size: 1.35em; margin-top: 1em; }
+        .markdown-content h2 { font-size: 1.2em; }
+        .markdown-content h3 { font-size: 1.1em; }
+        .markdown-content pre { overflow-x: auto; max-width: 100%; padding: 10px; background: #f3f5f7; border-radius: 4px; white-space: pre; }
+        .markdown-content code { font-family: monospace; background: #f3f5f7; }
+        .markdown-content table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; }
+        .markdown-content th, .markdown-content td { padding: 6px; border: 1px solid #ddd; }
+        .markdown-content blockquote { margin-left: 0; padding-left: 12px; border-left: 3px solid #ccc; color: #555; }
+        .markdown-content a { color: #0056b3; }
+        .transcript-item.system { color: #666; font-size: 0.85em; }
+        .model-run { font-size: 0.8em; color: #888; margin-top: 4px; }
+        .trace { margin-top: 10px; padding: 8px; background: #f0f0f0; border-radius: 4px; font-size: 0.8em; white-space: pre-wrap; display: none; }
+        .trace-toggle { font-size: 0.85em; color: #007bff; cursor: pointer; text-decoration: underline; margin-top: 4px; }
+        select { width:100%; padding:8px; font-size:16px; box-sizing:border-box; }
+        .breakdown { background:#eef3f8; padding:10px; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:0.85em; }
+        .btn-row { flex-wrap:wrap; }
+        .trace { overflow-wrap:anywhere; }
+        .hidden { display: none; }
+        .error-banner { margin-top: 8px; padding: 8px; background: #fff3cd; color: #856404; border-radius: 4px; font-size: 0.85em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Local Agent Screenshot Chat</h1>
+        <div class="pairing" id="pairing-panel">
+            <p>Enter pairing code:</p>
+            <input id="pairing-code" type="password" autocomplete="off" placeholder="Code printed on your computer" aria-label="Pairing code">
+            <button type="button" class="btn-secondary" id="login-btn">Login</button>
+        </div>
+        <div class="form-group hidden" id="info-panel">
+            <div id="model-display"></div>
+            <label for="thread-select">Saved chats (history)</label><select id="thread-select"><option value="">New chat</option></select>
+            <p id="history-note" class="model-run"></p>
+            <label for="model-select">Image interpretation / chat model</label><select id="model-select"></select>
+            <label for="inference-select">Netlist inference model (text)</label><select id="inference-select"></select>
+            <label for="reviewer-select">OpenAI reviewer (paid)</label><select id="reviewer-select"></select>
+            <button type="button" id="refresh-models">Refresh model catalogs</button>
+            <p class="model-run">Capabilities are advertised by Ollama, not measured circuit accuracy. A selected local model loads when its question starts.</p>
+            <div id="breakdown" class="breakdown">No thread selected.</div>
+            <details id="usage-panel"><summary>Token usage and estimated OpenAI savings</summary>
+              <pre id="thread-usage" style="white-space:pre-wrap">Select a saved chat.</pre>
+              <pre id="all-usage" style="white-space:pre-wrap"></pre>
+              <button type="button" id="refresh-usage">Refresh token totals</button>
+            </details>
+            <p class="model-run">Top thumbs rate the whole thread. Rate individual replies with the buttons inside each answer.</p>
+            <div class="btn-row">
+              <button type="button" id="netlist-btn">Infer draft netlist</button>
+              <button type="button" id="verify-btn">Review with OpenAI (paid)</button>
+              <button type="button" id="thumb-up" aria-label="Thumbs up">👍</button>
+              <button type="button" id="thumb-down" aria-label="Thumbs down">👎</button>
+            </div><p id="verifier-note" class="model-run"></p>
+        </div>
+        <div class="form-group">
+            <label for="question">Question:</label>
+            <textarea id="question" placeholder="Describe what you want to know about the screenshot..." maxlength="8000"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="image">Schematic image:</label>
+            <input type="file" id="image" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.gif,.heic,.heif,.tif,.tiff">
+            <p class="model-run">Choose an image up to 20 MiB. Large or other decodable images are prepared to fit the upload limits. If Photos says “Unable to load”, save the crop locally and choose it from Files/Browse.</p>
+            <div class="preview hidden" id="preview-container">
+                <img id="preview" alt="Preview">
+            </div>
+        </div>
+        <div class="btn-row">
+            <button type="button" class="btn-primary" id="ask-btn">Ask</button>
+            <button type="button" class="btn-secondary" id="new-conversation-btn">New Conversation</button>
+            <button type="button" class="btn-secondary" id="resume-btn" disabled>Resume</button>
+        </div>
+        <div class="status" id="status">Ready</div>
+        <div class="error-banner hidden" id="error-banner"></div>
+        <div class="transcript" id="transcript"></div>
+        <div id="run-display" class="model-run"></div>
+        <p id="context-note" class="model-run">Chats and screenshots are saved on this computer. Recent exchanges are reused as memory.</p>
+        <button type="button" class="trace-toggle" id="trace-toggle">Show / hide trace events</button>
+        <div class="trace" id="trace"></div>
+    </div>
+
+    <script nonce="NONCE_VALUE" src="/thread-controls.js"></script>
+    <script nonce="NONCE_VALUE">
+const els = Object.fromEntries(['pairing-panel','pairing-code','login-btn','info-panel','model-display',
+  'question','image','preview-container','preview','ask-btn','new-conversation-btn','resume-btn',
+  'status','error-banner','transcript','trace-toggle','trace','run-display','context-note',
+  'thread-select','model-select','inference-select','refresh-models','breakdown','netlist-btn','verify-btn','thumb-up','thumb-down','verifier-note','reviewer-select','history-note','thread-usage','all-usage','refresh-usage']
+  .map(id => [id, document.getElementById(id)]));
+let currentJobId = null, lastJobId = null, activeQuestion = '', image = null;
+let currentThreadId = null, threadData = null, catalog = null;
+const answerVotesPending = new Set();
+let transcript = [], paired = false, pollTimer = null, polling = false, uploading = false;
+const storage = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+  remove(key) { try { localStorage.removeItem(key); } catch {} }
+};
+function status(message) { els.status.textContent = message; }
+function showError(message) { els['error-banner'].textContent = message; els['error-banner'].classList.remove('hidden'); }
+function clearError() { els['error-banner'].classList.add('hidden'); }
+function busy(value) {
+  els['ask-btn'].disabled = value || !paired;
+  els.image.disabled = value;
+  for (const id of ['model-select','inference-select','reviewer-select','thread-select','refresh-models']) els[id].disabled = value || !paired;
+  els['netlist-btn'].disabled = value || !paired || !currentThreadId;
+  els['verify-btn'].disabled = value || !paired || !currentThreadId || !catalog?.verifier.enabled || !els['reviewer-select'].value;
+  if (catalog) els['verifier-note'].textContent = 'Paid reviewer: ' + (els['reviewer-select'].value.replace(/^openai:/, '') || catalog.verifier.model || 'not configured') + ' · ' + (!catalog.verifier.enabled ? catalog.verifier.reason : !currentThreadId ? 'Open a saved chat or ask a question first.' : 'Press Review to send the saved image and recent chat to OpenAI. API billing applies.');
+  els['thumb-up'].disabled = els['thumb-down'].disabled = value || !paired || !currentThreadId;
+  for (const button of document.querySelectorAll('.answer-feedback button')) button.disabled = value || !paired || !button.dataset.answerId || answerVotesPending.has(button.dataset.answerId);
+  els['new-conversation-btn'].disabled = value;
+  els['resume-btn'].disabled = !currentJobId || polling || !paired;
+}
+function render() {
+  els.transcript.replaceChildren();
+  let latest = -1;
+  transcript.forEach((item, index)=>{ if (item.role === 'assistant') latest = index; });
+  for (const [index, item] of transcript.entries()) {
+    const assistant = item.role === 'assistant';
+    const div = document.createElement(assistant ? 'details' : 'div');
+    div.className = 'transcript-item ' + item.role;
+    if (assistant) {
+      div.open = index === latest;
+      const summary = document.createElement('summary');
+      summary.textContent = (item.kind === 'review' ? 'OpenAI review' : item.kind === 'netlist' ? 'Netlist draft' : 'Agent reply') + (item.model ? ' · ' + item.model : '');
+      const preview = document.createElement('span'); preview.className = 'reply-preview';
+      preview.textContent = item.content.replace(/\s+/g, ' ').slice(0, 110);
+      summary.appendChild(preview); div.appendChild(summary);
+      const content = document.createElement('div'); content.className = 'markdown-content';
+      // Only the server's Markdown renderer/sanitizer supplies this derived HTML.
+      if (typeof item.rendered_html === 'string') content.innerHTML = item.rendered_html;
+      else { content.textContent = item.content; content.style.whiteSpace = 'pre-wrap'; }
+      div.appendChild(content);
+    } else div.textContent = 'You: ' + item.content;
+    if (assistant && item.model) {
+      const meta = document.createElement('div'); meta.className = 'model-run';
+      meta.textContent = item.model + ' · ' + (item.provider || 'recorded') + ' · Run: ' + (item.run_id || 'not created') + ' · unverified';
+      div.appendChild(meta);
+    }
+    if (assistant) {
+      const ratings = document.createElement('div'); ratings.className = 'answer-feedback btn-row';
+      const label = document.createElement('span'); label.className = 'model-run'; label.textContent = 'Rate this answer:'; ratings.appendChild(label);
+      const note = document.createElement('span'); note.className = 'model-run'; note.setAttribute('aria-live', 'polite');
+      const controls = [];
+      const updateVote = vote => {
+        for (const [button, value] of controls) button.setAttribute('aria-pressed', String(vote === value));
+        note.textContent = item.job_id ? (vote ? 'Saved: ' + (vote === 'up' ? '👍' : '👎') : 'No vote') : 'Imported history has no answer ID';
+      };
+      const threadId = currentThreadId;
+      for (const [vote, icon] of [['up','👍'], ['down','👎']]) {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = icon;
+        button.dataset.answerId = item.job_id || ''; button.dataset.vote = vote;
+        button.setAttribute('aria-label', 'Thumbs ' + vote + ' for this answer');
+        button.disabled = !paired || !!currentJobId || !item.job_id;
+        button.addEventListener('click', async ()=>{
+          answerVotesPending.add(item.job_id);
+          busy(true);
+          controls.forEach(([b])=>b.disabled=true);
+          try {
+            const updated = await api('/threads/' + threadId + '/answers/' + item.job_id + '/feedback', {vote:item.feedback === vote ? null : vote});
+            const saved = updated.messages.find(m=>m.role === 'assistant' && m.job_id === item.job_id);
+            item.feedback = saved.feedback; updateVote(item.feedback);
+            if (threadId === currentThreadId) {
+              threadData = updated;
+              const live = transcript.find(m=>m.role === 'assistant' && m.job_id === item.job_id);
+              if (live) live.feedback = saved.feedback;
+              breakdown();
+            }
+          } catch (error) { showError(error.message); }
+          finally { answerVotesPending.delete(item.job_id); busy(!!currentJobId || uploading || answerVotesPending.size > 0); }
+        });
+        controls.push([button,vote]); ratings.appendChild(button);
+      }
+      updateVote(item.feedback); ratings.appendChild(note); div.appendChild(ratings);
+    }
+    els.transcript.appendChild(div);
+  }
+}
+async function api(path, data) {
+  const response = await fetch('/api' + path, data === undefined ? {} : {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+  });
+  const value = await response.json();
+  if (!response.ok) {
+    if (response.status === 401) {
+      paired = false;
+      els['pairing-panel'].classList.remove('hidden');
+      busy(!!currentJobId || uploading);
+    }
+    throw new Error(value.error || ('HTTP ' + response.status));
+  }
+  return value;
+}
+async function refreshModels() {
+  catalog = await api('/models');
+  for (const id of ['model-select','inference-select']) {
+    const selected = els[id].value || storage.get(id) || catalog.default_id;
+    ThreadControls.catalogOptions(els[id], catalog.models, selected);
+  }
+  ThreadControls.catalogOptions(els['reviewer-select'], catalog.verifier.models || [], els['reviewer-select'].value || storage.get('reviewer-select') || catalog.verifier.default_id);
+  if (catalog.error || catalog.verifier.error) showError(catalog.error || catalog.verifier.error);
+  busy(!!currentJobId || uploading);
+}
+async function refreshThreads() {
+  const threads = await api('/threads');
+  ThreadControls.renderThreads(els['thread-select'], threads, currentThreadId);
+  els['history-note'].textContent = threads.length + ' saved chats — choose one to continue with its image and recent memory.';
+}
+async function refreshUsage() {
+  const selected = currentThreadId;
+  const [all, thread] = await Promise.all([api('/usage'), selected ? api('/threads/' + selected + '/usage') : Promise.resolve(null)]);
+  ThreadControls.renderUsage(els['all-usage'], all, 'All saved chats');
+  if (selected === currentThreadId) {
+    if (thread) ThreadControls.renderUsage(els['thread-usage'], thread, 'Selected chat');
+    else els['thread-usage'].textContent = 'Select a saved chat to see its token totals.';
+  }
+}
+function breakdown() {
+  ThreadControls.breakdown(els.breakdown, threadData);
+  els['thumb-up'].setAttribute('aria-pressed', String(threadData?.feedback === 'up'));
+  els['thumb-down'].setAttribute('aria-pressed', String(threadData?.feedback === 'down'));
+}
+async function openThread(id, resume=true) {
+  const value = await api('/threads/' + id);
+  currentThreadId = id; threadData = value; transcript = value.messages; image = value.image;
+  storage.set('threadId', id);
+  if (image) {
+    els.preview.src = 'data:' + value.mime + ';base64,' + image;
+    els['preview-container'].classList.remove('hidden');
+  } else { els.preview.removeAttribute('src'); els['preview-container'].classList.add('hidden'); }
+  render(); breakdown();
+  lastJobId = [...transcript].reverse().find(m=>m.job_id)?.job_id || null;
+  els.trace.textContent = ''; els.trace.style.display = 'none';
+  els['context-note'].textContent = 'Saved ' + transcript.length/2 + ' exchanges. Memory: latest 3 complete exchanges, up to 16,000 characters; older chat remains visible.';
+  if (resume && value.pending_job) {
+    currentJobId = value.pending_job; activeQuestion = 'Saved question';
+    storage.set('currentJobId', currentJobId);
+    poll();
+  }
+  await refreshThreads(); await refreshUsage(); busy(!!currentJobId || uploading);
+}
+async function ensureThread(title) {
+  if (currentThreadId) return currentThreadId;
+  currentThreadId = (await api('/threads', {title:title.slice(0,160) || 'New chat'})).thread_id;
+  storage.set('threadId', currentThreadId);
+  return currentThreadId;
+}
+async function info() {
+  const value = await api('/info');
+  paired = true;
+  els['pairing-panel'].classList.add('hidden');
+  els['info-panel'].classList.remove('hidden');
+  els['model-display'].textContent = 'Local owner · terminal pairing (not OAuth) · uploads and chat; no local file tools';
+  if (value.restart_required) showError('The phone app was updated on the computer. Restart its phone server, then reload this page and pair again.');
+  await refreshModels();
+  const saved = currentThreadId || storage.get('threadId');
+  if (saved) await openThread(saved);
+  else { await refreshThreads(); await refreshUsage(); }
+  busy(!!currentJobId || uploading);
+}
+async function login() {
+  els['login-btn'].disabled = true;
+  try {
+    await api('/login', {code:els['pairing-code'].value.trim()});
+    els['pairing-code'].value = '';
+    clearError();
+    await info();
+    if (currentJobId) poll();
+  } catch (error) { showError(error.message); }
+  finally { els['login-btn'].disabled = false; }
+}
+async function ask(kind='answer') {
+  if (currentJobId || uploading || els['ask-btn'].disabled) return;
+  const question = els.question.value.trim();
+  if (kind === 'answer' && !question) { showError('Enter a question first.'); return; }
+  busy(true); clearError(); status('Submitting…');
+  try {
+    await ensureThread(question);
+    let request, endpoint;
+    if (kind === 'review') { request = {model_id:els['reviewer-select'].value}; endpoint = 'review'; }
+    else if (kind === 'netlist') { request = {model_id:els['inference-select'].value}; endpoint = 'netlist'; }
+    else {
+      request = {question, model_id:els['model-select'].value}; endpoint = 'ask';
+      if (image) request.image = image;
+    }
+    const value = await api('/threads/' + currentThreadId + '/' + endpoint, request);
+    currentJobId = value.job_id; activeQuestion = kind === 'answer' ? question : kind === 'review' ? 'Paid OpenAI review' : 'Draft netlist inference';
+    storage.set('currentJobId', currentJobId); storage.set('activeQuestion', activeQuestion);
+    els.question.value = ''; await refreshThreads(); poll();
+  } catch (error) { showError(error.message); status('Submission was not confirmed.'); busy(false); }
+}
+async function poll() {
+  if (!currentJobId || polling) return;
+  clearTimeout(pollTimer); polling = true; busy(true); clearError();
+  try {
+    const job = await api('/jobs/' + currentJobId);
+    if (['completed','failed','interrupted'].includes(job.status)) {
+      lastJobId = currentJobId;
+      els['run-display'].textContent = 'Model: ' + job.model + ' · Run: ' + (job.run_id || 'not created');
+      if (job.status === 'completed') {
+        if (job.thread_id) await openThread(job.thread_id, false);
+        else { transcript.push({role:'user', content:activeQuestion}, {role:'assistant', content:job.answer}); render(); }
+        status('Completed · answer/review is unverified');
+      } else { if (job.thread_id) await openThread(job.thread_id, false); status(job.status); showError(job.error || 'Run did not complete.'); }
+      currentJobId = null; activeQuestion = '';
+      storage.remove('currentJobId'); storage.remove('activeQuestion');
+      els.trace.textContent = ''; els.trace.style.display = 'none';
+    } else {
+      status(job.status + ' · ' + (job.kind || 'answer') + ' · ' + job.model + ' (' + (job.provider || 'recorded') + ') · ' + activeQuestion);
+      if (threadData) { threadData.pending_stage = job; breakdown(); }
+      pollTimer = setTimeout(poll, 1000);
+    }
+  } catch (error) {
+    showError(error.message + ' · Pair again or press Resume to check the same request.');
+    status('Polling paused; the question may still be running.');
+  } finally { polling = false; busy(!!currentJobId || uploading); }
+}
+function clearConversation() {
+  if (currentJobId || uploading) return;
+  clearTimeout(pollTimer); image = null; transcript = []; lastJobId = null; currentThreadId = null; threadData = null;
+  storage.remove('threadId'); els['thread-select'].value = ''; breakdown();
+  els.question.value = ''; els.image.value = ''; els.preview.removeAttribute('src');
+  els['preview-container'].classList.add('hidden');
+  els.trace.textContent = ''; els.trace.style.display = 'none';
+  els['run-display'].textContent = ''; clearError(); render(); status('Ready');
+  storage.remove('currentJobId'); storage.remove('activeQuestion');
+  els['context-note'].textContent = 'New chat. Earlier conversations remain in Saved chats.';
+  busy(false); refreshUsage().catch(error=>showError(error.message));
+}
+const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+const MAX_PIXELS = 16000000;
+function imageBytes(dataUrl) {
+  const data = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  return Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+}
+async function prepareImage(file) {
+  if (!file.size) throw new Error('The selected file is empty. Save a local copy and select it again.');
+  if (file.size > MAX_SOURCE_BYTES) throw new Error('Selected image exceeds 20 MiB. Crop or resize it first.');
+  // File.type can be empty or wrong after cropping/exporting. Decode the bytes instead.
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    const timer = setTimeout(() => reader.abort(), 30000);
+    reader.onload = () => { clearTimeout(timer); resolve(reader.result); };
+    reader.onerror = () => { clearTimeout(timer); reject(new Error('Cannot read this file from the phone. Download/save a local copy, then select it from Files/Browse.')); };
+    reader.onabort = () => { clearTimeout(timer); reject(new Error('Reading the image timed out. Save it locally and try Files/Browse.')); };
+    reader.readAsDataURL(file);
+  });
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const signature = atob(base64.slice(0, 48));
+  // Use a trustworthy MIME for PNG/JPEG even if the picker reports an unknown type.
+  const sourceMime = signature.startsWith('\x89PNG\r\n\x1a\n') ? 'image/png'
+    : signature.startsWith('\xff\xd8\xff') ? 'image/jpeg' : null;
+  const decodeMime = sourceMime
+    || (signature.startsWith('RIFF') && signature.slice(8, 12) === 'WEBP' ? 'image/webp' : null)
+    || (signature.startsWith('GIF87a') || signature.startsWith('GIF89a') ? 'image/gif' : null)
+    || (signature.startsWith('BM') ? 'image/bmp' : null);
+  const decodeUrl = decodeMime ? 'data:' + decodeMime + ';base64,' + base64 : dataUrl;
+  const decoded = await new Promise((resolve, reject) => {
+    const picture = new Image();
+    const timer = setTimeout(() => { picture.src = ''; reject(new Error('Decoding the image timed out. Export the crop as PNG/JPEG.')); }, 30000);
+    picture.onload = () => { clearTimeout(timer); resolve(picture); };
+    picture.onerror = () => { clearTimeout(timer); reject(new Error('This browser cannot decode the selected image. Export it as PNG or JPEG, save it locally, and choose Files/Browse.')); };
+    picture.src = decodeUrl;
+  });
+  const originalWidth = decoded.naturalWidth, originalHeight = decoded.naturalHeight;
+  if (!originalWidth || !originalHeight) throw new Error('The selected image has no readable dimensions.');
+  let width = originalWidth, height = originalHeight, preparedUrl = decodeUrl;
+  let changed = false;
+  if (!sourceMime || file.size > MAX_UPLOAD_BYTES || width * height > MAX_PIXELS) {
+    const ratio = Math.min(1, Math.sqrt(MAX_PIXELS / (width * height)));
+    width = Math.max(1, Math.floor(width * ratio)); height = Math.max(1, Math.floor(height * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not prepare this image. Export a smaller PNG/JPEG copy.');
+    context.fillStyle = '#ffffff'; context.fillRect(0, 0, width, height);
+    context.drawImage(decoded, 0, 0, width, height);
+    preparedUrl = canvas.toDataURL('image/png');
+    if (imageBytes(preparedUrl) > MAX_UPLOAD_BYTES) preparedUrl = canvas.toDataURL('image/jpeg', 0.92);
+    if (imageBytes(preparedUrl) > MAX_UPLOAD_BYTES) throw new Error('Prepared image still exceeds 4 MiB. Crop to a smaller circuit block to preserve readable labels.');
+    changed = true;
+  }
+  if (!preparedUrl.startsWith('data:image/')) throw new Error('Image preparation failed. Export a smaller PNG/JPEG.');
+  return {url:preparedUrl, width, height, changed, originalWidth, originalHeight};
+}
+async function selectImage() {
+  if (currentJobId || uploading) return;
+  const file = els.image.files[0];
+  if (!file) return;
+  clearError(); uploading = true; busy(true); status('Checking image…');
+  try {
+    const prepared = await prepareImage(file);
+    uploading = false;
+    const draftQuestion = els.question.value;
+    if (currentThreadId) clearConversation(); els.question.value = draftQuestion;
+    image = prepared.url.slice(prepared.url.indexOf(',') + 1); els.preview.src = prepared.url;
+    els['preview-container'].classList.remove('hidden');
+    status('Screenshot attached; reused for follow-up questions. ' + prepared.width + ' × ' + prepared.height
+      + (prepared.changed ? ' · prepared from ' + prepared.originalWidth + ' × ' + prepared.originalHeight + '; check small labels remain readable.' : ''));
+  } catch (error) {
+    showError(error.message);
+    status(image ? 'New image failed to load. Previous screenshot is still attached.' : 'No image attached.');
+  } finally { uploading = false; els.image.value = ''; busy(false); }
+}
+async function trace() {
+  if (!currentThreadId && !lastJobId) { showError('Open a saved thread first to view its trace.'); return; }
+  if (els.trace.style.display === 'block') { els.trace.style.display = 'none'; return; }
+  try {
+    const events = await api(currentThreadId ? '/threads/' + currentThreadId + '/events' : '/jobs/' + lastJobId + '/events');
+    els.trace.textContent = events.map(e => `${e.run_seq} ${e.event_type} ${e.actor}\n${JSON.stringify(e.data, null, 2)}`).join('\n\n');
+    els.trace.style.display = 'block';
+  } catch (error) { showError(error.message); }
+}
+els['login-btn'].addEventListener('click', login);
+els['pairing-code'].addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+els['ask-btn'].addEventListener('click', () => ask());
+els['netlist-btn'].addEventListener('click', () => ask('netlist'));
+els['refresh-usage'].addEventListener('click', ()=>refreshUsage().catch(error=>showError(error.message)));
+els['reviewer-select'].addEventListener('change', ()=>{storage.set('reviewer-select',els['reviewer-select'].value);busy(!!currentJobId || uploading);});
+els['verify-btn'].addEventListener('click', () => ask('review'));
+els['refresh-models'].addEventListener('click', async () => { try { await api('/models/refresh', {}); await refreshModels(); } catch (error) { showError(error.message); } });
+els['thread-select'].addEventListener('change', async () => { if (!els['thread-select'].value) { clearConversation(); return; } try { await openThread(els['thread-select'].value); } catch (error) { showError(error.message); } });
+for (const id of ['model-select','inference-select']) els[id].addEventListener('change', () => storage.set(id, els[id].value));
+for (const [id,vote] of [['thumb-up','up'],['thumb-down','down']]) els[id].addEventListener('click', async () => { try { threadData = await api('/threads/' + currentThreadId + '/feedback', {vote:threadData?.feedback === vote ? null : vote}); breakdown(); } catch (error) { showError(error.message); } });
+els['new-conversation-btn'].addEventListener('click', clearConversation);
+els['resume-btn'].addEventListener('click', poll);
+els.image.addEventListener('change', selectImage);
+els['trace-toggle'].addEventListener('click', trace);
+async function initialize() {
+  if (!window.ThreadControls || typeof window.ThreadControls.catalogOptions !== 'function') {
+    showError('Model controls could not load. Reload this page. If this continues, restart the phone server on the computer, then reload and pair again.');
+    status('Browser controls unavailable.'); busy(false); els['login-btn'].disabled = true;
+    return;
+  }
+  const saved = storage.get('currentJobId');
+  if (saved && /^[0-9a-f]{32}$/.test(saved)) {
+    currentJobId = saved; activeQuestion = storage.get('activeQuestion') || 'Saved question';
+    status('Pair to resume checking your saved request.');
+  }
+  busy(!!currentJobId);
+  try { await info(); if (currentJobId) poll(); }
+  catch (error) { if (paired) showError(error.message); }
+}
+initialize();
+    </script>
+</body>
+</html>

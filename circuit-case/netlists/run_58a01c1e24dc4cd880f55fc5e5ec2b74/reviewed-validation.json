@@ -1,0 +1,19 @@
+{
+  "status": "draft_requires_review",
+  "coverage": "partial",
+  "pages": [
+    45
+  ],
+  "emitted_passives": [
+    "C911",
+    "C912"
+  ],
+  "omitted_components": [],
+  "unresolved": [
+    "R741-R747 node transcription in the original model graph is unreliable; omitted pending tracing.",
+    "Active-device pin maps, models, Main/Sub paths, servo and page-46 continuation are not included.",
+    "No voltage sources, node-0 reference or simulation analysis have been specified."
+  ],
+  "simulation_ready": false,
+  "topology_verified": false
+}

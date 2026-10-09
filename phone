@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Start paired screenshot chat from any working directory.
+set -euo pipefail
+HARNESS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
+elif [[ -x "$HOME/.local/bin/uv" ]]; then
+    UV_BIN="$HOME/.local/bin/uv"
+else
+    echo "UV was not found. Install UV or add it to PATH." >&2
+    exit 127
+fi
+cd -- "$HARNESS_DIR"
+exec "$UV_BIN" run --locked local-agent phone-web "$@"

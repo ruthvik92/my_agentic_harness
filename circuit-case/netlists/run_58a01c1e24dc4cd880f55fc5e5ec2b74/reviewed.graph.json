@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "title": "Dragon Auto Azimuth P.C.B.: inspected supply decoupling only",
+  "pages": [
+    45
+  ],
+  "coverage": "partial",
+  "components": [
+    {
+      "schema_version": 1,
+      "ref": "C911",
+      "kind": "C",
+      "value": "470u",
+      "part_number": "470u/16V",
+      "nodes": [
+        "V12_pos_rail",
+        "GND_rail"
+      ],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [
+          0.46,
+          0.34,
+          0.52,
+          0.41
+        ],
+        "note": "Page 45 supply input: C911 470 microfarads / 16V; rail and named GND endpoint inspected."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "C912",
+      "kind": "C",
+      "value": "470u",
+      "part_number": "470u/16V",
+      "nodes": [
+        "V12_neg_rail",
+        "GND_rail"
+      ],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [
+          0.46,
+          0.34,
+          0.52,
+          0.41
+        ],
+        "note": "Page 45 supply input: C912 470 microfarads / 16V; rail and named GND endpoint inspected."
+      },
+      "uncertainty": ""
+    }
+  ],
+  "unresolved": [
+    "R741-R747 node transcription in the original model graph is unreliable; omitted pending tracing.",
+    "Active-device pin maps, models, Main/Sub paths, servo and page-46 continuation are not included.",
+    "No voltage sources, node-0 reference or simulation analysis have been specified."
+  ]
+}

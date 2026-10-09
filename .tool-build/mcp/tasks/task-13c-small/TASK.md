@@ -1,0 +1,1 @@
+This source snapshot intentionally contains only this task brief. Create src/local_agent/runtime/image_records.py. The full harness will supply imports later. No repository discovery is needed. Implement only descriptor lookup; artifact saving is a later task.

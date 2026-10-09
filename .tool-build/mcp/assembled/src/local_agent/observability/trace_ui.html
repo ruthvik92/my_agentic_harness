@@ -1,0 +1,124 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local agent traces</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#10141d;color:#e4e9f4}body{margin:0;padding:24px;max-width:1400px;margin:auto}h1{font-size:26px;margin:0 0 8px}button,select,input{background:#202938;color:inherit;border:1px solid #465673;padding:9px;border-radius:7px}button{cursor:pointer}header p{color:#aebad1}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0;align-items:center}select{max-width:100%}article{border-left:3px solid #77a1ee;margin:12px 0;padding:12px;background:#192130;border-radius:5px}summary{cursor:pointer;font-family:monospace;white-space:pre-wrap}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111722;padding:12px;border-radius:5px;max-height:650px;overflow:auto}small{color:#b5c5df}.refs{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.ref{font-family:monospace;font-size:12px}#notice{color:#f1c46d}dialog{background:#182133;color:inherit;border:1px solid #607aa7;border-radius:10px;max-width:90vw;width:1000px}dialog::backdrop{background:#0009}#summary{color:#aebad1}
+#addform{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+#addform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#aebad1}
+#addform input{min-width:220px}
+#sources{margin:14px 0;border:1px solid #465673;border-radius:6px;padding:8px 12px;background:#151c29}
+#sources summary{font-family:system-ui;font-size:14px}
+#sources ul{margin:8px 0 0;padding-left:20px;font-family:monospace;font-size:12px;color:#b5c5df}
+#sources li{margin:3px 0}
+#sources .err{color:#f1c46d}
+</style>
+<header><h1>Local agent traces</h1><p>Read-only run timeline · inputs, decisions and outcomes · local evidence</p></header>
+<div class="controls">
+<select id="source" aria-label="Source"></select>
+<select id="project" aria-label="Project"></select>
+<select id="runs" aria-label="Run"></select>
+<button id="refresh">Refresh runs</button>
+<input id="filter" placeholder="Filter events" aria-label="Filter events">
+<button id="audit">Audit run</button>
+</div>
+<div id="addform">
+<label>Host trace location (path on the HOST machine, not this device)
+<input id="location" placeholder="/home/user/.local/share/local-agent" aria-label="Host trace location"></label>
+<label>Project name (optional)
+<input id="projectname" placeholder="my-project" aria-label="Project name"></label>
+<button id="add">Add location</button>
+</div>
+<details id="sources">
+<summary>Registered sources &amp; status</summary>
+<ul id="sourcelist"></ul>
+</details>
+<p id="summary"></p><p id="notice" role="status"></p><main id="events"></main>
+<dialog id="evidence"><button id="close">Close</button><h2 id="title"></h2><pre id="payload"></pre><div id="more"></div></dialog>
+<script nonce="NONCE_VALUE">
+const $=id=>document.getElementById(id);
+let current=null,events=[],cachedRuns=[];
+const STORE_KEY='trace-ui-filters';
+function savedFilters(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return null;const v=JSON.parse(raw);return v&&typeof v==='object'?v:null}catch{return null}}
+function persistFilters(){try{localStorage.setItem(STORE_KEY,JSON.stringify({source:$('source').value,project:$('project').value,run:$('runs').value}))}catch{}}
+function restoreFilters(){const v=savedFilters();if(!v)return;
+if(typeof v.source==='string')$('source').dataset.pending=v.source;
+if(typeof v.project==='string')$('project').dataset.pending=v.project;
+if(typeof v.run==='string')$('runs').dataset.pending=v.run}
+async function get(path){const r=await fetch(path);const data=await r.json();if(!r.ok)throw Error(data.error||r.status);return data}
+async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let data={};try{data=await r.json()}catch{}if(!r.ok)throw Error(data.error||r.status);return data}
+function message(e){$('notice').textContent=e.message||String(e)}
+function refs(value,out=new Set()){if(typeof value==='string'&&/^blob:\/\/[0-9a-f]{64}$/.test(value))out.add(value);else if(value&&typeof value==='object')Object.values(value).forEach(v=>refs(v,out));return out}
+function show(title,payload){$('title').textContent=title;$('payload').textContent=payload;$('more').replaceChildren();try{buttons($('more'),JSON.parse(payload))}catch{}if(!$('evidence').open)$('evidence').showModal()}
+function runId(){if(!current)return null;const i=current.indexOf(':');return i>=0?current.slice(i+1):current}
+function selectedRunRow(){if(!current)return null;return cachedRuns.find(r=>`${r.source_id}:${r.id}`===current)||null}
+function sourceParam(){const row=selectedRunRow();const s=row&&row.source_id?row.source_id:'';return s?`?source=${encodeURIComponent(s)}`:''}
+async function evidence(ref){const key=current;if(!key){message('No run selected.');return}try{const data=await get(`/api/runs/${encodeURIComponent(runId())}/evidence/${ref.slice(7)}${sourceParam()}`);if(current!==key)return;let content=data.content;try{content=JSON.stringify(JSON.parse(content),null,2)}catch{}show(`${ref} · ${data.bytes} bytes`,content)}catch(e){if(current!==key)return;message(e)}}
+function buttons(parent,value){const row=document.createElement('div');row.className='refs';for(const ref of refs(value)){const b=document.createElement('button');b.className='ref';b.textContent=ref;b.onclick=()=>evidence(ref);row.append(b)}parent.append(row)}
+function render(){const parent=$('events');parent.replaceChildren();const filter=$('filter').value.toLowerCase();const start=events.length?Date.parse(events[0].timestamp_utc):0;for(const e of events){if(!JSON.stringify(e).toLowerCase().includes(filter))continue;const a=document.createElement('article'),d=document.createElement('details'),s=document.createElement('summary');s.textContent=`${String(e.run_seq).padStart(4,'0')}  +${((Date.parse(e.timestamp_utc)-start)/1000).toFixed(3)}s  ${e.event_type}  [${e.actor}]`;const p=document.createElement('pre');p.textContent=JSON.stringify(e,null,2);d.append(s,p);buttons(d,e.data);a.append(d);parent.append(a)}}
+function clearSelection(){current=null;events=[];$('summary').textContent='';$('events').replaceChildren();$('audit').disabled=true;if($('evidence').open)$('evidence').close()}
+async function load(){const selected=$('runs').value;current=selected;events=[];$('summary').textContent='';$('events').replaceChildren();if(!$('evidence').open)$('evidence').close();if(!selected){$('audit').disabled=true;$('notice').textContent='No run selected. Choose a run above or adjust the source/project filters.';return}
+$('notice').textContent='';
+$('audit').disabled=false;
+try{const row=selectedRunRow();const data=await get(`/api/runs/${encodeURIComponent(runId())}${sourceParam()}`);
+if(current!==selected)return;
+events=data.events;const run=data.run||{};const project=row&&row.project?row.project:(run.project||'(none)');const sourceRoot=row&&row.source_root?row.source_root:(run.source_root||'(none)');
+$('summary').textContent=`${selected} · ${run.status||''} · ${events.length} events · ${run.created_utc||''} · project: ${project} · source_root: ${sourceRoot}`;$('notice').textContent='';render();buttons($('summary'),{manifest:run.manifest_ref})}catch(e){if(current!==selected)return;message(e)}}
+function renderSources(sources){const ul=$('sourcelist');ul.replaceChildren();
+for(const s of sources){const li=document.createElement('li');
+if(s.error){li.className='err';li.textContent=`${s.id} — ${s.root||'(no root)'} — ${s.error}`}
+else li.textContent=`${s.id} — ${s.root||'(no root)'}${s.project?' — '+s.project:''}`;
+ul.append(li)}
+if(!sources.length)ul.append(Object.assign(document.createElement('li'),{textContent:'No sources registered yet.'}))}
+function populateSourceSelect(sources){const sel=$('source');const prev=sel.value||sel.dataset.pending||'';sel.replaceChildren();
+const all=document.createElement('option');all.value='';all.textContent='All sources';sel.append(all);
+for(const s of sources){const o=document.createElement('option');o.value=s.id;o.textContent=s.id+(s.root?` (${s.root})`:'');sel.append(o)}
+if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;else sel.value='';
+delete sel.dataset.pending}
+function populateProjectSelect(runs){const sel=$('project');const prev=sel.value||sel.dataset.pending||'';sel.replaceChildren();
+const all=document.createElement('option');all.value='';all.textContent='All projects';sel.append(all);
+const seen=new Set();for(const r of runs){const p=r.project||'';if(p&&!seen.has(p)){seen.add(p);const o=document.createElement('option');o.value=p;o.textContent=p;sel.append(o)}}
+if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;else sel.value='';
+delete sel.dataset.pending}
+function visibleRuns(runs){const s=$('source').value,p=$('project').value;
+return runs.filter(r=>(!s||r.source_id===s)&&(!p||r.project===p))}
+function populateRunSelect(runs,selected){const sel=$('runs');sel.replaceChildren();
+const all=document.createElement('option');all.value='';all.textContent='— select a run —';sel.append(all);
+for(const r of runs){const o=document.createElement('option');o.value=`${r.source_id}:${r.id}`;o.textContent=`${r.created_utc} · ${r.status} · ${r.id}${r.source_id?` [${r.source_id}]`:''}`;sel.append(o)}
+if(selected&&[...sel.options].some(o=>o.value===selected))sel.value=selected;else if(runs.length)sel.value=`${runs[0].source_id}:${runs[0].id}`;else sel.value='';
+delete sel.dataset.pending}
+async function refresh(){try{
+const [sources,runs]=await Promise.all([get('/api/sources'),get('/api/runs')]);
+cachedRuns=runs;
+populateSourceSelect(sources);renderSources(sources);
+populateProjectSelect(runs);
+const sel=$('runs');const prev=sel.value||sel.dataset.pending||'';
+const visible=visibleRuns(runs);
+populateRunSelect(visible,prev);
+if(!visible.length){clearSelection();$('notice').textContent='No runs match the current source/project filters. Add a host trace location above or change filters.'}
+else if(!sel.value){sel.value=visible[0].source_id+':'+visible[0].id}
+await load();persistFilters()}catch(e){message(e)}}
+$('runs').onchange=()=>{load();persistFilters()};
+$('source').onchange=()=>{const prev=$('runs').value;const visible=visibleRuns(cachedRuns);populateRunSelect(visible,prev);if(!visible.length){clearSelection();$('notice').textContent='No runs match the current source/project filters. Add a host trace location above or change filters.'}else if($('runs').value!==prev)load();persistFilters()};
+$('project').onchange=()=>{const prev=$('runs').value;const visible=visibleRuns(cachedRuns);populateRunSelect(visible,prev);if(!visible.length){clearSelection();$('notice').textContent='No runs match the current source/project filters. Add a host trace location above or change filters.'}else if($('runs').value!==prev)load();persistFilters()};
+$('refresh').onclick=refresh;
+$('audit').disabled=true;
+$('filter').oninput=render;
+$('close').onclick=()=>$('evidence').close();
+$('audit').onclick=async()=>{const key=current;if(!key){message('No run selected.');return}try{const data=await get(`/api/runs/${encodeURIComponent(runId())}/audit${sourceParam()}`);if(current!==key)return;show('Audit',JSON.stringify(data,null,2))}catch(e){if(current!==key)return;message(e)}};
+$('add').onclick=async()=>{
+const location=$('location').value.trim();
+const project=$('projectname').value.trim();
+if(!location){message('Enter a host trace location path.');return}
+try{
+const body={location,project:project||undefined};
+await post('/api/sources',body);
+$('location').value='';$('projectname').value='';
+$('notice').textContent='Source added. Refreshing…';
+await refresh();
+$('notice').textContent='';
+}catch(e){
+let msg=e.message||String(e);
+if(/invalid|path/i.test(msg))msg='Invalid host path: '+msg+' (location must be a path on the HOST machine, not this device)';
+message(msg)}};
+restoreFilters();
+refresh();
+</script></html>

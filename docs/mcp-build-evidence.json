@@ -1,0 +1,44 @@
+{
+  "authorship": "local-agent harness agents; Codex reviewed/integrated/independently verified",
+  "models": [
+    "glm-4.7-flash:q8_0",
+    "qwen3.8:27b"
+  ],
+  "formatter_and_error_fix_run": "run_57bb4e4d0b714af5b85c757c9af7f443",
+  "documentation_run": "run_940018d056254a028e8aa662bec76946",
+  "protocol_test_run": "run_d540b0f8be484c468998df6f5348ece3",
+  "coding_fixture_run": "run_0aec2b6f344348528d81683ca0bb54b3",
+  "vision_fixture_run": "run_45c5a29fe884495ca113e073325e76df",
+  "checks": {
+    "pytest_with_pinned_docker": "140 passed in 71.29s",
+    "ruff_check": "passed",
+    "ruff_format_check": "106 files already formatted",
+    "installed_launcher_sdk_handshake": "passed",
+    "live_vision": "Qwen3.8 answered Red; audit ok",
+    "live_coding": "isolated file created; added punctuation; client must review"
+  },
+  "hashes": {
+    "src/local_agent/mcp_bridge/stdio.py": "d4d3bde4ec5d17cc321037785f61eab5bc47ca947008b2f79bbef44d1f52c129",
+    "src/local_agent/mcp_bridge/modalities.py": "346cdad60a1a03c07d45c88ce555d8c2cc84d32501bd031565626d41a78eb5f6",
+    "src/local_agent/mcp_bridge/artifacts.py": "4c5730700f4d5e1af7915c13ea46ee919a3c42e264108e08c488e2bc2c0b0d88",
+    "src/local_agent/mcp_bridge/circuits.py": "d0ad0460753dc782f1ec5398fb28d897c7880fc9b0f1bef99a441f22352a4716",
+    "src/local_agent/mcp_bridge/profiles.py": "a7dac02dc967416be9d622d841135abbd1f30eb47fc041e5f903d708a8c44404",
+    "src/local_agent/mcp_bridge/coding.py": "00e7d805e68f3f4f1b1cbfc615016f4bdd6a26bc5780d4716d41e5be6eb9e49b",
+    "src/local_agent/mcp_bridge/process.py": "1d95db57d1008427172b916cfff9ee0fd8cd0d1432cb9fb1ad411364f8922807",
+    "src/local_agent/mcp_bridge/images.py": "fba98c8ecc3841bf3ecdd8cad1eb6b7a66acb36ff5e5604b2c1fd1dc157abe96",
+    "src/local_agent/mcp_bridge/ledger.py": "74bf2899d583936364606a0c1d55b9c7b4d5e960c9d24caadafdd0677516e55e",
+    "src/local_agent/mcp_bridge/trace.py": "c01025afc8c3ea5d3b1f0a8bf8592dd7b6cb2bd2954cf11564a7bfd4705acae4",
+    "tests/test_mcp_process.py": "563e82c47f6a80c9744ab4a8d96f426ef17d67b2ca6dec429bbeb5f6ef59c95a",
+    "tests/test_mcp_cleanup.py": "2eb551070fe471a004eeebdbe36f027f5e4b7996a9d43d725da8df08c645cd7d",
+    "tests/test_mcp_protocol.py": "87a162c56e25e83817bfc2c3044f3bb702c10b5d01a14ebf92aa124af7bd5981",
+    "tests/test_mcp_profiles.py": "9397eeedf60774299d4ae2cb9eed69c0f1afe6928f3f4f64070fd40132d49361",
+    "tests/test_mcp_coding.py": "75b9b9741c04448c8fa375b01abe68468855056b82eaed85ec4f41a86e01200e",
+    "pyproject.toml": "81555b9860cb95ef644ab5b07a2da28d01d3da67cb64ceb9ab9c5af9420fd1c4",
+    "uv.lock": "3e8699f06dddeb3e741786bce3518817c428ec59a917ea19215f758d1640c39e",
+    "mcp-harness": "9c706699e0c35d195d7d731771debf667e932fa9957c0098d73dd298fa73f579",
+    "docs/mcp.md": "bf5194444f56277b9a8dba8fd86910c20a306598b1e87bb829916283b1102651"
+  },
+  "archive": "/home/ruthvik/.local/share/local-agent-mcp-build",
+  "codex_registration": "~/.codex/config.toml: local-harness",
+  "claude": "documented; CLI not installed"
+}

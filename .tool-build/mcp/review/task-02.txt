@@ -1,0 +1,6 @@
+Task 02: stdlib workspace_io.py, <=70 lines, secure parent_fd context manager
+and bounded read_bytes function. Root defaults /workspace; root override only for
+trusted caller/unit checks. Approved roots project,memory,tools,scratch,outputs.
+Reject absolute/traversal/empty/backslash/NUL; fd-based O_NOFOLLOW directory walk;
+nonblocking nofollow file read, regular files only, positive bound, limit+1 read.
+Optional parent directory creation; close FDs on failures. No registry or models.

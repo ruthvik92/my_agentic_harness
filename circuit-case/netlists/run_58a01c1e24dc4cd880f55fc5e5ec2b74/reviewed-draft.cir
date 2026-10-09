@@ -1,0 +1,10 @@
+* Dragon Auto Azimuth P.C.B.: inspected supply decoupling only
+* UNREVIEWED DRAFT - not a verified/simulation-ready circuit
+* Evidence: PDF pages 45; coverage=partial
+* Node names are schematic transcription hypotheses, not measurements.
+* C911: page 45, region [0.46, 0.34, 0.52, 0.41]
+C911 V12_pos_rail GND_rail 470u
+* C912: page 45, region [0.46, 0.34, 0.52, 0.41]
+C912 V12_neg_rail GND_rail 470u
+* No supply, stimulus, device model or analysis has been fabricated.
+.end

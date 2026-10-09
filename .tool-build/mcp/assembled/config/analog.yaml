@@ -1,0 +1,14 @@
+schema_version: 1
+agent_id: analog
+provider: ollama
+model: qwen3.8:27b
+instructions_version: analog-v2
+tools: [read_file, write_file, patch_file, list_files, search_files, run_command, git_diff, register_tool, execute_tool, render_pdf_region, view_image]
+policy_profile: dev-offline-v1
+window_tokens: 65536
+output_reserve_tokens: 16384
+limits:
+  max_model_turns: 30
+  max_attempted_tool_calls: 100
+  run_timeout_seconds: 1800
+  model_timeout_seconds: 300

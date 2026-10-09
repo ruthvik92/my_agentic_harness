@@ -1,0 +1,1 @@
+Create image_crash_driver.py by adapting existing crash_driver.py. The supervisor executes the driver in the full harness; this author sandbox only compiles it. Do not inspect missing installed dependencies.

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-agent"
+version = "0.1.0"
+description = "A durable, observable local coding-agent harness"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "opentelemetry-sdk>=1.30,<2",
+    "httpx>=0.28,<1",
+    "pyyaml>=6,<7",
+    "pillow>=11,<13",
+    "tiktoken>=0.12,<1",
+    "markdown-it-py>=3,<5",
+    "bleach>=6,<7",
+    "mcp>=1.26,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.scripts]
+local-agent = "local_agent.cli:main"
+local-agent-mcp = "local_agent.mcp_bridge.stdio:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["fixtures"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+
+[tool.setuptools.package-data]
+"local_agent.observability" = ["trace_ui.html"]
+"local_agent.mobile" = ["static/*.html", "static/*.js"]

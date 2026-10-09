@@ -1,0 +1,28 @@
+{
+  "status": "draft_requires_review",
+  "coverage": "partial",
+  "pages": [
+    45
+  ],
+  "emitted_passives": [
+    "C911",
+    "C912",
+    "R741",
+    "R742",
+    "R743",
+    "R744"
+  ],
+  "omitted_components": [
+    "R747",
+    "IC741"
+  ],
+  "unresolved": [
+    "GND rail is a named connector net from Logic P.C.B.; no explicit ground symbol (node 0) observed in this region.",
+    "R741 far node (D741 anode) junction dot not fully resolved at available resolution.",
+    "R747 far connection exits the selected region toward the left boundary.",
+    "IC741 power pins (1, 8) connect to +12V/-12V rails outside the selected crop.",
+    "Page 45 shows only the left half of the Auto Azimuth P.C.B.; page 46 continues the right side."
+  ],
+  "simulation_ready": false,
+  "topology_verified": false
+}

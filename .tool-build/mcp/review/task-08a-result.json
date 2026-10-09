@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"run_id\": \"run_bdd58f2933894988bdf5bbdb3c22b0b3\",\n  \"status\": \"budget_exhausted\",\n  \"error\": \"model turns\",\n  \"capability_probe\": {\n    \"passed\": true,\n    \"run_id\": \"run_0db4781bae134fc7a84075b6aa0fa3b2\",\n    \"model\": \"qwen3.8:27b\",\n    \"key\": \"eac6689cf2f5ed7026c7de10f443a3ab30060b7a1bb26e55184f5ae363dd3d1e\",\n    \"checks\": [\n      \"valid_tool_selection\",\n      \"schema_adherence\",\n      \"tool_result_continuation\",\n      \"sensible_stop\"\n    ]\n  },\n  \"provider\": \"ollama\",\n  \"model\": \"qwen3.8:27b\",\n  \"exit_code\": 1\n}"
+    }
+  ],
+  "isError": false
+}

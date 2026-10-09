@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "provider": "ollama",
+  "model": "qwen3.8:27b",
+  "authoring_root": "/home/ruthvik/.local/share/local-agent-trace-build",
+  "review_root": "/home/ruthvik/.local/share/local-agent-trace-build/review",
+  "files_sha256": {
+    "src/local_agent/observability/sources.py": "3558a5b736a7510c926ea16e70725ece422e20fc302d8617d4f998c12c6a7d0c",
+    "src/local_agent/observability/browser.py": "1d743db439385b1f306b8bbbc8189d2d87084c64bd072fee50b07dd03e26daef",
+    "src/local_agent/observability/trace_ui.html": "fa4751ae3a685e0412145917fd7b7b3a90b4d620ae52233e4d602fbd452fbff5",
+    "tests/test_trace_sources.py": "7bdcb96a7e59b8656b2d2926378a8b888dc3046af4c266a1cafc235f57c3412b",
+    "tests/test_trace_browser_sources.py": "142b2c9809056bc239b9cd858d3cc1af87d52b29638b07e62229928d3e34d8b8",
+    "tests/test_openai_browser.py": "1e04e59fb66c394c5ba06b775c8c3f17fd34905240dcfdf7f51c1696f0b7271c",
+    "traces": "3747c3a2e66d8f3312e7278379a3151b23934ced9f451ce1ebe9455a83cac1b2",
+    "docs/traces.md": "c88fbf8ce93a3b6859489fe0a07f40c9b8d4f447a3f93566f7b09de00fb561c3"
+  },
+  "project_counts": {
+    "Trace browser": 24,
+    "MCP frontend": 79,
+    "Main harness": 60
+  },
+  "tests": "161 passed in 73.30s with pinned Docker image",
+  "browser_checks": "Chromium phone viewport: source registration, project/source filtering, events, evidence, reload persistence, empty state; installed viewer checked separately",
+  "authoring_notes": "Primarily installed MCP harness_run_code. Opaque MCP calls without run_id retried via actual local-agent run; no Codex implementation. Some early runs cancelled/budget_exhausted, review follow-ups authored accepted corrections."
+}

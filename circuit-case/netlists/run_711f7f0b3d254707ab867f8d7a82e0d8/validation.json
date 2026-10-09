@@ -1,0 +1,23 @@
+{
+  "status": "draft_requires_review",
+  "coverage": "partial",
+  "pages": [
+    44
+  ],
+  "emitted_passives": [
+    "R715",
+    "C705"
+  ],
+  "omitted_components": [
+    "VR701",
+    "R710"
+  ],
+  "unresolved": [
+    "R710 value not legible in crop",
+    "R707, R708, R709 biasing resistor values not legible",
+    "IC602(3/4) pin 6 control input connection inferred from parallel channels",
+    "Q702 collector supply rail (+8.2V) inferred from parallel channels, not explicitly labelled in this crop"
+  ],
+  "simulation_ready": false,
+  "topology_verified": false
+}

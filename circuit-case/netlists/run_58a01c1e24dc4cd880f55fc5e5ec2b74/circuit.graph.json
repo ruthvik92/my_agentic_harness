@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "title": "Auto Azimuth P.C.B. — power decoupling and manual-control input (partial)",
+  "pages": [45],
+  "coverage": "partial",
+  "components": [
+    {
+      "schema_version": 1,
+      "ref": "C911",
+      "kind": "C",
+      "value": "470u",
+      "part_number": "470u/16V",
+      "nodes": ["V12_pos_rail", "GND_rail"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.28, 0.38, 0.42, 0.52],
+        "note": "C911 470u/16V decoupling cap between +12V and GND rails, visible in top-left crop."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "C912",
+      "kind": "C",
+      "value": "470u",
+      "part_number": "470u/16V",
+      "nodes": ["V12_neg_rail", "GND_rail"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.28, 0.42, 0.42, 0.55],
+        "note": "C912 470u/16V decoupling cap between -12V and GND rails, visible in top-left crop."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "R741",
+      "kind": "R",
+      "value": "390K",
+      "nodes": ["K_down_in", "D741_anode"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.30, 0.28, 0.45, 0.40],
+        "note": "R741 390K in series with K down input from Control P.C.B. CN-20 pin 2."
+      },
+      "uncertainty": "Far node (D741 anode) inferred from diode symbol; exact junction dot not fully resolved at 600 DPI."
+    },
+    {
+      "schema_version": 1,
+      "ref": "R742",
+      "kind": "R",
+      "value": "180K",
+      "nodes": ["IC741_pin6", "IC741_pin4"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.35, 0.30, 0.50, 0.42],
+        "note": "R742 180K feedback resistor across IC741 (1/2) pins 6 and 4."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "R743",
+      "kind": "R",
+      "value": "390K",
+      "nodes": ["IC741_pin5", "IC741_pin6"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.35, 0.30, 0.50, 0.42],
+        "note": "R743 390K between IC741 (1/2) pins 5 and 6."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "R744",
+      "kind": "R",
+      "value": "180K",
+      "nodes": ["IC741_pin5", "IC741_pin7"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.35, 0.30, 0.50, 0.42],
+        "note": "R744 180K between IC741 (1/2) pins 5 and 7."
+      },
+      "uncertainty": ""
+    },
+    {
+      "schema_version": 1,
+      "ref": "R747",
+      "kind": "R",
+      "value": "47K",
+      "nodes": ["IC741_pin6", "boundary_left"],
+      "connection_status": "boundary",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.30, 0.35, 0.45, 0.45],
+        "note": "R747 47K from IC741 pin 6 toward left boundary; far connection exits the selected region."
+      },
+      "uncertainty": "Far node exits the visible crop; marked boundary."
+    },
+    {
+      "schema_version": 1,
+      "ref": "IC741",
+      "kind": "IC",
+      "value": null,
+      "part_number": "uPC4556C",
+      "nodes": ["IC741_pin2", "IC741_pin3", "IC741_pin4", "IC741_pin5", "IC741_pin6", "IC741_pin7", "IC741_pin8"],
+      "connection_status": "observed",
+      "evidence": {
+        "schema_version": 1,
+        "page": 45,
+        "region": [0.30, 0.25, 0.55, 0.45],
+        "note": "IC741 uPC4556C dual op-amp; both halves (1/2 and 2/2) visible with pin numbers."
+      },
+      "uncertainty": "Pin 1 and pin 8 (power) connections extend to rails outside the selected crop."
+    }
+  ],
+  "unresolved": [
+    "GND rail is a named connector net from Logic P.C.B.; no explicit ground symbol (node 0) observed in this region.",
+    "R741 far node (D741 anode) junction dot not fully resolved at available resolution.",
+    "R747 far connection exits the selected region toward the left boundary.",
+    "IC741 power pins (1, 8) connect to +12V/-12V rails outside the selected crop.",
+    "Page 45 shows only the left half of the Auto Azimuth P.C.B.; page 46 continues the right side."
+  ]
+}
