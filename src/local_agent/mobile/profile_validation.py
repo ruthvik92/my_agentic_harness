@@ -24,7 +24,8 @@ def metadata(name: str, config: AgentConfig) -> Dict[str, Any]:
         "window_tokens": config.window_tokens,
         "output_reserve_tokens": config.output_reserve_tokens,
         "limits": config.limits.model_dump(mode='json'),
-        "api_key_env": config.api_key_env
+        "api_key_env": config.api_key_env,
+        "execution": config.execution.model_dump(mode="json"),
     }
 
 def validate_profile(name: str, content: str) -> Dict[str, Any]:

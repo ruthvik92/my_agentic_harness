@@ -87,6 +87,32 @@ An API key alone does not enable reviewer discovery or requests. See
 The `browser-v1` and `phone-v1` chat workflows accept an uploaded screenshot
 plus conversation history. The default browser profile has an empty `tools[]`
 list, and `browser-v1` can explicitly enable any listed tool helpers.
+The older screenshot-chat netlist selector and optional reviewer controls appear
+only in chat mode. Coding hides them; the analog PDF workflow generates its
+own draft netlist without a separate inference-model selector.
+
+## Execution mode
+
+For profiles with tools, choose **Execution mode** below the model selector:
+
+- **Use profile default** shows the YAML's actual default.
+- **Ephemeral** creates a container for each tool call.
+- **Persistent** reuses a workspace-owned container between tool calls.
+
+For a coding task, select `coder.yaml`, choose **Persistent**, enter the source
+workspace and submit. The effective mode appears in the job status and saved
+reply. This is a per-job override: the YAML file stays unchanged, and subsequent
+tasks using the default still follow their selected profile. The mode is frozen
+in the job's config and used again on recovery. Analog profiles support the
+same selector; profiles without tools hide it.
+
+Persistence preserves container state such as `/tmp` during the task. Shell
+commands remain separate processes, and a new task gets a new workspace and
+container. Project files remain available in either execution mode. Saved chat
+history is independent of container persistence. Resource and idle limits still
+apply; see [execution lifecycle](executor.md).
+
+## Project workflows
 
 Coder profiles require an explicit host workspace under the allowed roots
 (default launch cwd is the harness checkout). A Git repository root gets a new

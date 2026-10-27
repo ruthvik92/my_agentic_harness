@@ -55,6 +55,7 @@
         .btn-row { flex-wrap:wrap; }
         .trace { overflow-wrap:anywhere; }
         .hidden { display: none; }
+        [hidden] { display: none !important; }
         .error-banner { margin-top: 8px; padding: 8px; background: #fff3cd; color: #856404; border-radius: 4px; font-size: 0.85em; }
     </style>
 </head>
@@ -73,10 +74,21 @@
             <label for="thread-select">Saved chats (history)</label><select id="thread-select"><option value="">New chat</option></select>
             <p id="history-note" class="model-run"></p>
             <label for="model-select">Model override (optional)</label><select id="model-select"></select>
-            <label for="inference-select">Netlist inference model (text)</label><select id="inference-select"></select>
-            <label for="reviewer-select">OpenAI reviewer (paid)</label><select id="reviewer-select"></select>
+            <div id="legacy-circuit-controls" hidden>
+              <label for="inference-select">Screenshot chat: netlist inference model</label><select id="inference-select"></select>
+              <label for="reviewer-select">Screenshot chat: OpenAI reviewer (paid)</label><select id="reviewer-select"></select>
+            </div>
+            <div class="form-group" id="execution-fields" hidden>
+              <label for="execution-mode">Execution mode</label>
+              <select id="execution-mode">
+                <option value="">Use profile default</option>
+                <option value="ephemeral">Ephemeral — new container per tool call</option>
+                <option value="persistent">Persistent — reuse container within this workspace</option>
+              </select>
+              <p class="model-run">Persistent keeps container state such as /tmp between tool calls in this run. Each command starts a new process. A new task creates a new workspace; this does not control saved chat history. Project files survive either mode.</p>
+            </div>
             <button type="button" id="refresh-models">Refresh model catalogs</button>
-            <p class="model-run">Capabilities are advertised by Ollama, not measured circuit accuracy. A selected local model loads when its question starts.</p>
+            <p class="model-run">Model capabilities are advertised by Ollama. Review the actual changes and tests to assess completion. The selected local model loads when its task starts.</p>
             <div id="breakdown" class="breakdown">No thread selected.</div>
             <details id="usage-panel"><summary>Token usage and estimated OpenAI savings</summary>
               <pre id="thread-usage" style="white-space:pre-wrap">Select a saved chat.</pre>
@@ -136,7 +148,7 @@
             <textarea id="question" placeholder="Ask about the screenshot or the selected workspace..." maxlength="8000"></textarea>
         </div>
         <div class="form-group" id="image-fields">
-            <label for="image">Schematic image:</label>
+            <label for="image">Image attachment (optional):</label>
             <input type="file" id="image" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.gif,.heic,.heif,.tif,.tiff">
             <p class="model-run">Choose an image up to 20 MiB. Large or other decodable images are prepared to fit the upload limits. If Photos says “Unable to load”, save the crop locally and choose it from Files/Browse.</p>
             <div class="preview hidden" id="preview-container">
@@ -179,11 +191,12 @@ function status(message) { els.status.textContent = message; }
 function showError(message) { els['error-banner'].textContent = message; els['error-banner'].classList.remove('hidden'); }
 function clearError() { els['error-banner'].classList.add('hidden'); }
 function busy(value) {
+  const legacyCircuit = window.ConfigControls && typeof window.ConfigControls.mode === 'function' && window.ConfigControls.mode() === 'chat';
   els['ask-btn'].disabled = value || !paired;
   els.image.disabled = value || (window.ConfigControls && typeof window.ConfigControls.mode === 'function' && window.ConfigControls.mode() === 'circuit');
   for (const id of ['model-select','inference-select','reviewer-select','thread-select','refresh-models']) els[id].disabled = value || !paired;
-  els['netlist-btn'].disabled = value || !paired || !currentThreadId;
-  els['verify-btn'].disabled = value || !paired || !currentThreadId || !catalog?.verifier.enabled || !els['reviewer-select'].value;
+  els['netlist-btn'].disabled = value || !paired || !currentThreadId || !legacyCircuit;
+  els['verify-btn'].disabled = value || !paired || !currentThreadId || !legacyCircuit || !catalog?.verifier.enabled || !els['reviewer-select'].value;
   if (catalog) els['verifier-note'].textContent = 'Paid reviewer: ' + (els['reviewer-select'].value.replace(/^openai:/, '') || catalog.verifier.model || 'not configured') + ' · ' + (!catalog.verifier.enabled ? catalog.verifier.reason : !currentThreadId ? 'Open a saved chat or ask a question first.' : 'Press Review to send the saved image and recent chat to OpenAI. API billing applies.');
   els['thumb-up'].disabled = els['thumb-down'].disabled = value || !paired || !currentThreadId;
   for (const button of document.querySelectorAll('.answer-feedback button')) button.disabled = value || !paired || !button.dataset.answerId || answerVotesPending.has(button.dataset.answerId);
@@ -217,6 +230,7 @@ function render() {
       let metaText = item.model + ' · ' + (item.provider || 'recorded') + ' · Run: ' + (item.run_id || 'not created') + ' · unverified';
       if (item.profile_name) metaText += ' · profile: ' + item.profile_name;
       if (item.mode) metaText += ' · mode: ' + item.mode;
+      if (item.execution_mode) metaText += ' · execution: ' + item.execution_mode;
       if (item.tools) metaText += ' · tools: ' + (Array.isArray(item.tools) ? item.tools.join(', ') : item.tools);
       meta.textContent = metaText;
       div.appendChild(meta);
@@ -384,7 +398,8 @@ async function poll() {
     const job = await api('/jobs/' + currentJobId);
     if (['completed','failed','interrupted'].includes(job.status)) {
       lastJobId = currentJobId;
-      els['run-display'].textContent = 'Model: ' + job.model + ' · Run: ' + (job.run_id || 'not created');
+      els['run-display'].textContent = 'Model: ' + job.model + ' · Run: ' + (job.run_id || 'not created') +
+        (job.execution_mode ? ' · execution: ' + job.execution_mode : '');
       if (job.status === 'completed') {
         if (job.thread_id) await openThread(job.thread_id, false);
         else { transcript.push({role:'user', content:activeQuestion}, {role:'assistant', content:job.answer}); render(); }
@@ -394,7 +409,8 @@ async function poll() {
       storage.remove('currentJobId'); storage.remove('activeQuestion');
       els.trace.textContent = ''; els.trace.style.display = 'none';
     } else {
-      status(job.status + ' · ' + (job.kind || 'answer') + ' · ' + job.model + ' (' + (job.provider || 'recorded') + ') · ' + activeQuestion);
+      status(job.status + ' · ' + (job.kind || 'answer') + ' · ' + job.model + ' (' + (job.provider || 'recorded') + ')' +
+        (job.execution_mode ? ' · ' + job.execution_mode + ' execution' : '') + ' · ' + activeQuestion);
       if (threadData) { threadData.pending_stage = job; breakdown(); }
       pollTimer = setTimeout(poll, 1000);
     }

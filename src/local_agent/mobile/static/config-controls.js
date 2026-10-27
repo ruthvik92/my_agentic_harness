@@ -14,7 +14,7 @@
     ['config-select', 'config-editor-file', 'config-name', 'config-content', 'config-new',
      'config-clone', 'config-load', 'config-validate', 'config-save', 'config-refresh',
      'workspace-input', 'pdf-input', 'page-input', 'dpi-input', 'context-page-input',
-     'region-input', 'model-select'].forEach((id) => { const n = el(id); if (n) n.disabled = d; });
+     'region-input', 'model-select', 'execution-mode'].forEach((id) => { const n = el(id); if (n) n.disabled = d; });
   }
   function fillSelect(node, names, current) {
     node.textContent = '';
@@ -26,6 +26,11 @@
     el('workspace-fields').hidden = mode === 'chat';
     el('circuit-fields').hidden = mode !== 'circuit';
     el('image-fields').hidden = mode === 'circuit';
+    const legacyCircuit = mode === 'chat';
+    ['legacy-circuit-controls', 'netlist-btn', 'verify-btn', 'verifier-note'].forEach(id => {
+      el(id).hidden = !legacyCircuit;
+    });
+    el('execution-fields').hidden = !selected || !Array.isArray(selected.tools) || selected.tools.length === 0;
   }
   function detailText(p) {
     if (!p) return 'No valid agent profile available.';
@@ -40,6 +45,10 @@
     el('config-select').value = selected ? selected.name : '';
     setDetail(detailText(selected));
     updateVisibility();
+    const execution = el('execution-mode');
+    execution.value = '';
+    execution.options[0].textContent = 'Use profile default (' +
+      ((selected && selected.execution && selected.execution.execution_mode_default) || 'ephemeral') + ')';
     if (selected && !el('workspace-input').value && window.__allowedRoots && window.__allowedRoots.length)
       el('workspace-input').value = window.__allowedRoots[0];
   }
@@ -169,6 +178,11 @@
     if (!selected) throw new Error('No valid profile selected');
     const mode = selected.mode;
     const out = { profile_name: selected.name };
+    const execution = el('execution-mode').value;
+    if (!el('execution-fields').hidden && execution) {
+      if (!['ephemeral', 'persistent'].includes(execution)) throw new Error('Invalid execution mode');
+      out.execution_mode = execution;
+    }
     const ws = el('workspace-input').value.trim();
     if (mode === 'coding' || mode === 'circuit') {
       if (!ws) throw new Error('workspace is required');

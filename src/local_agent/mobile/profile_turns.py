@@ -26,6 +26,7 @@ _ALLOWED_FIELDS = frozenset(
         "dpi",
         "region",
         "context_page",
+        "execution_mode",
     }
 )
 
@@ -129,6 +130,15 @@ def submit_profile_turn(server, thread_id, payload):
         workflow = cfg.instructions_version
         image, mime, explicit = _resolve_image(server, thread, payload, workflow)
         cfg = _resolve_config(server, cfg, payload, image)
+        if "execution_mode" in payload:
+            execution_mode = payload["execution_mode"]
+            if not isinstance(execution_mode, str) or execution_mode not in {"ephemeral", "persistent"}:
+                _reject("execution_mode must be ephemeral or persistent")
+            if not cfg.tools:
+                _reject("execution_mode requires a tool-enabled profile")
+            cfg = cfg.model_copy(update={"execution": cfg.execution.model_copy(
+                update={"execution_mode_default": execution_mode}
+            )})
 
         request = {
             "question": payload.get("question"),
@@ -166,6 +176,8 @@ def submit_profile_turn(server, thread_id, payload):
         }
         if request["mode"] == "coding":
             metadata["source_workspace"] = request["workspace"]
+        if cfg.tools:
+            metadata["execution_mode"] = cfg.execution.execution_mode_default
 
         job_id = server.jobs.submit(request, config=cfg, metadata=metadata)
         server.threads.update(thread_id, pending_job=job_id)

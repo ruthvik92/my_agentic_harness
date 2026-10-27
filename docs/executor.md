@@ -58,6 +58,10 @@ uv run --locked local-agent run \
   --agent config/coder.yaml --repo /path/to/repo --task-file task.md
 ```
 
+The browser also offers an **Execution mode** selector for tool-enabled profiles.
+Choose the profile default, ephemeral, or persistent for the submitted job;
+the effective mode is saved with the job and reply, without rewriting the YAML.
+See [browser execution mode](browser.md#execution-mode).
 The browser configuration editor accepts this block as well. Changes affect
 future runs; recovery uses the original frozen configuration. Persistent mode is
 opt-in for coding until its behavior has been evaluated on your tasks.

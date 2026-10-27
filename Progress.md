@@ -212,3 +212,37 @@ Validation:
 - Live verification/private startup log:
   `~/.local/share/local-agent-development/git-workspaces-20261027T150129Z`.
   Implementation tests used scripted providers, not local or paid inference.
+
+## 2026-10-27 — Profile-specific browser controls and execution mode selector
+
+Implemented directly under the user's authorization; no local or paid inference
+was used for authoring or validation.
+
+- The netlist inference/reviewer controls were legacy screenshot-chat controls
+  displayed for every selected profile. They now appear only for chat; coding
+  and native PDF circuit workflows hide them and their action buttons. Analog
+  PDF tasks already generate their own draft netlists. Image input uses a neutral
+  optional-attachment label instead of a schematic-only label.
+- Tool-enabled profiles now expose Execution mode: profile default (with its
+  actual value), ephemeral, or persistent. Switching profiles clears the override;
+  no-tools chat hides it. Controls are disabled while a job is busy.
+- The API strictly validates the optional per-job execution_mode and freezes it
+  in the selected config, config hash, job metadata and saved reply. It cannot
+  override resource/network policy or mutate the original YAML. Subsequent jobs
+  without an override follow the original profile default. Effective mode is
+  visible during polling and beside completed answers.
+- Help explains that persistent mode retains container state between tool calls
+  in the current workspace. It does not preserve shell process state or select
+  the same worktree for every new task; project files and chat history have
+  separate persistence.
+- Validation: **399 passed in 131.26s** against the pinned Docker image, with lint,
+  whitespace and current documentation links passing. New coverage includes
+  GJS-executed profile visibility/default/reset behavior, both coding and analog
+  frozen overrides, invalid/no-tools rejection, unchanged YAML/defaults, and an
+  actual browser submission whose two commands reuse one persistent keeper and
+  observe the same /tmp state. Tests use scripted inference and clean up keepers.
+- Gracefully reloaded the idle browser at http://192.168.1.22:8767. Verified the
+  selector asset and profile-default API metadata, authenticated with the new
+  pairing code (not recorded here). Live evidence/private startup log:
+  `~/.local/share/local-agent-development/browser-execution-controls-20261027T152613Z`.
+- Trusted worker, sandbox image pin and dependencies are unchanged.
