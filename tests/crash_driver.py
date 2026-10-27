@@ -15,7 +15,7 @@ from local_agent.storage.database import Store
 
 root, point, image = sys.argv[1:4]
 mode = sys.argv[4] if len(sys.argv) > 4 else "ephemeral"
-source = Path(__file__).parent / "fixtures" / "broken_repo"
+source = Path(sys.argv[5]) if len(sys.argv) > 5 else Path(__file__).parent / "fixtures" / "broken_repo"
 code = "from pathlib import Path; p=Path('count'); p.write_text((p.read_text() if p.exists() else '')+'X')"
 if point == "after_container_launch":
     code += "; import time; time.sleep(30)"

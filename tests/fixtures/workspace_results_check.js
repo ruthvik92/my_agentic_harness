@@ -44,6 +44,18 @@ async function main() {
   check(c.status.textContent.includes('manually'), 'failed clipboard must explain manual copy');
   const old = controls(panel({mode:'coding', workspace:'/old/ws'}));
   check(old.input.value === '/old/ws/project', 'saved reply must work without source metadata');
+  const branch = panel({mode:'coding', workspace:'/data/ws', job_id:'job123', diff_ref:'blob://diff',
+    git_workspace:{branch:'agent/ws_123', base_branch:'main', base_commit:'base123',
+      candidate_commit:'commit123', source_dirty:true, state:'ready_for_review', worktree:'/data/ws/project'}});
+  const children = branch.children[0].children;
+  check(children.some(n => n.textContent === 'Branch: agent/ws_123'), 'branch must be visible');
+  check(children.some(n => n.textContent === 'Starting commit: base123'), 'base commit must be visible');
+  check(children.some(n => (n.textContent || '').includes('pending changes')), 'pending edits must be explained');
+  let requested;
+  globalThis.fetch = async path => { requested = path; return {ok:true, json:async () => ({content:'<script>not HTML</script>\n+ code',truncated:false})}; };
+  await children.find(n => n.textContent === 'View changes').handlers.click();
+  check(requested === '/api/jobs/job123/diff', 'diff must use authenticated job endpoint');
+  check(children.find(n => n.tag === 'pre').textContent.includes('<script>not HTML</script>'), 'diff must stay literal text');
   print('Workspace result rendering and clipboard checks passed');
 }
 const loop = new GLib.MainLoop(null, false);

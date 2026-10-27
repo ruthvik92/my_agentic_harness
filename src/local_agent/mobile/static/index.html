@@ -116,7 +116,7 @@
             <div class="form-group" id="workspace-fields">
               <label for="workspace-input">Source workspace (host path under an allowed root)</label>
               <input id="workspace-input" type="text" placeholder="/allowed/roots/workspace">
-              <p class="model-run">Coding runs copy this folder and edit the isolated copy. Results show the edited project path; changes are not automatically applied here. Circuit mode requires a PDF.</p>
+              <p class="model-run">For a Git repository root, coding creates a new agent branch and worktree from committed HEAD. Pending edits are excluded and preserved here. Other folders use an isolated copy. Results show the branch, starting commit, worktree and diff; merging is explicit. Circuit mode requires a PDF.</p>
               <div class="form-group" id="circuit-fields">
                 <label for="pdf-input">Circuit PDF (relative path)</label>
                 <input id="pdf-input" type="text" placeholder="relative/path/to/schematic.pdf">

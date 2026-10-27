@@ -15,9 +15,12 @@ non-root and offline, with a read-only image, dropped capabilities, no GPU or
 Docker socket, 4 CPU cores, 4 GiB memory and 128 processes. The model server can
 use your host GPU; tool containers cannot.
 
-A repository is copied into `project`. Other workspace roots are `memory`,
-`tools`, `scratch` and `outputs`. The agent edits this copy. Your original repo
-is unchanged. The final diff is retained against a protected baseline.
+For coding against a Git repository root, `project` is a linked host worktree
+on a new `agent/ws_<id>` branch, starting from committed `HEAD`. Other folders
+use a copied project. Other workspace roots are `memory`, `tools`, `scratch`
+and `outputs`. Your current checkout and pending edits stay untouched. The host
+publishes a candidate commit and retains a protected final diff; review and
+merge remain explicit. See [Git workspaces](git-workspaces.md).
 
 The host stores authoritative records under `~/.local/share/local-agent/control`.
 SQLite tracks runs and ordered events; immutable SHA-256 blobs retain actual

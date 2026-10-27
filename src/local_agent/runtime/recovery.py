@@ -173,6 +173,11 @@ async def restore(agent, run_id):
     agent.run_id = run_id
     agent.workspace_id = manifest["workspace_id"]
     agent.path = agent.workspaces.path(agent.workspace_id)
+    if agent.workspaces.git_info(agent.workspace_id):
+        from local_agent.workspace.git import GitWorktrees
+
+        worktrees = GitWorktrees(agent.workspaces)
+        worktrees.verify(worktrees.load(agent.workspace_id))
     agent.baseline = store.control / "baselines" / agent.workspace_id
     agent.created = True
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(run["created_utc"])).total_seconds()

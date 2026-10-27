@@ -83,6 +83,11 @@ def test_config_editor_and_selected_coder_job(tmp_path):
             "audit": {"ok": True},
             "workspace": "isolated-copy",
             "diff_ref": "blob:stub",
+            "git_workspace": {
+                "branch": "agent/ws_example", "base_commit": "base", "base_branch": "main",
+                "candidate_commit": "candidate", "worktree": "isolated-copy/project",
+                "state": "ready_for_review", "source_dirty": False,
+            },
         }
 
     with running(state, runner, config_dir, workspace) as (server, client):
@@ -94,6 +99,7 @@ def test_config_editor_and_selected_coder_job(tmp_path):
         assert locations.status_code == 200
         assert locations.headers["content-type"].startswith("application/javascript")
         assert client.get("/api/configs").status_code == 401
+        assert client.get("/api/jobs/" + "a" * 32 + "/diff").status_code == 401
 
         login(server, client)
 
@@ -220,13 +226,17 @@ def test_config_editor_and_selected_coder_job(tmp_path):
         assert final["config_hash"] == job["config_hash"]
         assert final["workspace"] == job["workspace"]
         assert final["source_workspace"] == str(workspace)
+        assert final["git_workspace"]["branch"] == "agent/ws_example"
+        assert client.get(f"/api/jobs/{job_id}/diff").status_code == 404
         # Simulate an older stored reply, whose location exists only in its job record.
         raw = server.threads.get(thread_id)
         for message in raw["messages"]:
             message.pop("workspace", None)
             message.pop("source_workspace", None)
+            message.pop("git_workspace", None)
         server.threads.update(thread_id, messages=raw["messages"])
         reopened = client.get(f"/api/threads/{thread_id}").json()
         old_reply = next(m for m in reopened["messages"] if m["role"] == "assistant")
         assert old_reply["workspace"] == "isolated-copy"
         assert old_reply["source_workspace"] == str(workspace)
+        assert old_reply["git_workspace"]["candidate_commit"] == "candidate"

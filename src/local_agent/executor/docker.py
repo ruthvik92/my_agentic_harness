@@ -143,6 +143,16 @@ class DockerExecutor:
         if mode not in ("ephemeral", "persistent"):
             raise ValueError("unknown execution mode")
         options = validate_execution_options({"environment": {} if environment is None else environment})
+        if self.workspaces.git_info(request.workspace_id):
+            from local_agent.workspace.git import GitWorktrees
+
+            worktrees = GitWorktrees(self.workspaces)
+            worktrees.verify(worktrees.load(request.workspace_id))
+            # Shared host Git metadata is outside the mount. Container Git is scratch history only.
+            options["environment"].update({
+                "GIT_DIR": "/workspace/tools/.git-shadow",
+                "GIT_WORK_TREE": "/workspace/project",
+            })
         run_id, call_id = self.attempt_context(request.execution_id)
         emit = self.emitter(run_id, call_id, request.execution_id, request.workspace_id)
         emit("execution.requested", {"execution_mode": mode, "state": "CREATED"})

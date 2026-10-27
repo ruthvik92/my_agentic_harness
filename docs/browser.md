@@ -89,9 +89,11 @@ plus conversation history. The default browser profile has an empty `tools[]`
 list, and `browser-v1` can explicitly enable any listed tool helpers.
 
 Coder profiles require an explicit host workspace under the allowed roots
-(default launch cwd is the harness checkout). The workspace is copied into an
-isolated Docker workspace, and the resulting diff requires review and
-integration before it is applied.
+(default launch cwd is the harness checkout). A Git repository root gets a new
+`agent/ws_<id>` branch and linked host worktree from committed `HEAD`; pending
+source edits are excluded and preserved. Other directories use an isolated copy.
+The candidate is bind-mounted into Docker for tools. Review and merge remain
+explicit. See [Git workspaces](git-workspaces.md) for provenance and merge commands.
 
 Each coding reply shows **Edited workspace**, including the edited project path
 on the harness computer and a **Copy path** button. The source folder is shown
@@ -100,10 +102,15 @@ including older replies whose job record still contains the workspace path.
 On another device, open the copied path on the harness computer or in its IDE;
 it is not a downloadable browser filesystem link.
 
-The source-workspace field grants permission to import that project. Docker gets
-a writable mount of the isolated copy, not the original host directory. Review
-the candidate diff and tests before integrating changes. A completed reply does
-not mean changes have been applied to your source folder.
+Git-backed replies additionally show their source repository, base branch and
+commit, agent branch, candidate commit, review state and a **View changes**
+button. The diff is the run's captured artifact. Opening an old reply does not
+convert a copied project into a Git worktree.
+
+The source-workspace field selects a project to import or branch. Docker gets
+a writable mount of the run's worktree or isolated copy. Review the candidate
+diff and tests before merging or integrating. A completed reply does not mean
+changes have been merged into the source branch.
 
 Analog (circuit) profiles require a case workspace plus a relative PDF path,
 page, and dpi, with an optional context page and normalized region

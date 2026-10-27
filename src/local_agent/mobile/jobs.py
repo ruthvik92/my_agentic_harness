@@ -173,6 +173,7 @@ class Jobs:
                         "circuit",
                         "audit",
                         "capability_probe",
+                        "git_workspace",
                     ):
                         if field in result:
                             job[field] = result[field]

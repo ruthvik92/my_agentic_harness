@@ -147,3 +147,68 @@ No local agents or inference were invoked for this change.
 - Live verification and private startup logs are under
   `~/.local/share/local-agent-development/browser-workspace-results-20261027T134459Z`.
   Saved model answers and original projects were not edited by this UI change.
+
+## 2026-10-27 — Git branch/worktree coding workflow
+
+Implemented directly under the user's authorization. Coding against a selected
+Git repository root now creates an actual linked host worktree at the run's
+managed `project/` path, on branch `agent/ws_<id>`. The source checkout stays on
+its current branch. Staged, unstaged and untracked source edits are preserved and
+excluded; the run records committed HEAD as its exact base. Non-Git folders and
+selected repository subdirectories retain copied-project behavior. Chat, circuit
+runs and capability probes keep their previous workspace behavior.
+
+Git ownership and execution:
+
+- Docker still bind-mounts the run workspace. Model commands edit the host-visible
+  worktree directly, while shared Git metadata remains outside the container.
+- Container run_command/git_diff use private scratch Git history under tools;
+  their commits cannot move source-repository branches or hide candidate edits.
+- The host creates worktrees without checkout filters and materializes literal
+  committed blobs. Host publication uses a private index, literal blob writes,
+  commit-tree and compare-and-swap update-ref. Hooks, filters, signing and model-
+  supplied Git command arguments are excluded from host operations.
+- Publication uses the captured candidate snapshot, persists its intended commit
+  before moving the ref, and resumes idempotently. Pointer, branch and tip checks
+  reject unexpected host changes instead of overwriting them. Source index and
+  working files are untouched. Worktree-copy traversal now anchors descriptors
+  and refuses symlinks at every component, including a replaced project root.
+- Source revision and Git provenance appear in frozen config, run manifest,
+  workspace events, private control/git-workspaces manifests and final results.
+  Candidate branches/worktrees remain available for human or separately authorized
+  host-agent review. No automatic merge, push, stash or source reset is implemented.
+
+Browser showcase:
+
+- New Git-backed replies show source repository, base branch, exact starting
+  commit, agent branch, candidate commit, review state and worktree path.
+- Copy path and authenticated View changes show actual result locations and the
+  recorded diff, independent of model prose. Diff previews are bounded at 1 MiB
+  and rendered as literal text. Results persist in jobs/saved replies; older
+  copied runs retain their mode and gain diff viewing where an artifact exists.
+- The source input explicitly explains committed-HEAD behavior and exclusion of
+  pending edits. docs/git-workspaces.md covers limits and review/merge commands.
+- Worktrees initially require regular tracked files and committed HEAD; tracked
+  symlinks, submodules and tracked internal cache/archive folders are rejected.
+  Git LFS/checkout filters are not run. Offline dependency constraints remain.
+
+Validation:
+
+- Full pinned-Docker suite: **384 passed in 122.40s**, including ephemeral and
+  persistent worktree edits, private container Git, branch publication, actual
+  source preservation and resume after a real controller process crash.
+- Unit coverage verifies dirty/untracked exclusion, binary files, deletions,
+  ignored files, ordinary Git merging, no-op branches, concurrent branch changes,
+  disabled host hooks/filters, marker checks and interrupted ref publication.
+- Browser API/GJS checks cover saved branch metadata, authentication and artifact
+  ownership, literal diff rendering and clipboard behavior.
+- `uv run --locked ruff check src/local_agent tests scripts`, whitespace checks,
+  and current documentation links passed. Trusted worker/image/dependencies did
+  not change; the existing sandbox pin remains valid.
+- Reloaded the idle browser at http://192.168.1.22:8767 and independently verified
+  protected diff access, new widget asset and the saved calculator thread (200).
+  Its actual recorded diff shows the addition fix. Saved runs were not converted
+  retroactively. A new pairing code is required and is omitted from this record.
+- Live verification/private startup log:
+  `~/.local/share/local-agent-development/git-workspaces-20261027T150129Z`.
+  Implementation tests used scripted providers, not local or paid inference.

@@ -15,20 +15,35 @@ IMPORT_EXCLUDES = frozenset({
 
 def copy_tree(source: Path, target: Path, *, exclude=(), budget=MAX_IMPORT_BYTES):
     """Trusted provisioning only. Never follow source symlinks or copy special files."""
+    if source.is_symlink():
+        raise ValueError("repository copy rejects a symlink root")
+    fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        return _copy_directory(fd, target, exclude, budget)
+    finally:
+        os.close(fd)
+
+
+def _copy_directory(source_fd, target, exclude, budget):
     count = 0
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for entry in os.scandir(source):
+    for entry in os.scandir(source_fd):
         if entry.name in exclude:
             continue
         dest = target / entry.name
         if entry.is_symlink():
             raise ValueError(f"repository import rejects symlinks: {entry.name}")
         if entry.is_dir(follow_symlinks=False):
-            count += copy_tree(Path(entry.path), dest, exclude=exclude, budget=budget - count)
-        elif entry.is_file(follow_symlinks=False):
-            fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=source_fd)
             try:
-                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                count += _copy_directory(child, dest, exclude, budget - count)
+            finally:
+                os.close(child)
+        elif entry.is_file(follow_symlinks=False):
+            fd = os.open(entry.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=source_fd)
+            try:
+                mode = os.fstat(fd).st_mode
+                if not stat.S_ISREG(mode):
                     raise ValueError("repository contains a special file")
                 with os.fdopen(fd, "rb", closefd=False) as src, dest.open("xb") as out:
                     while chunk := src.read(65536):
@@ -36,7 +51,7 @@ def copy_tree(source: Path, target: Path, *, exclude=(), budget=MAX_IMPORT_BYTES
                         if count > budget:
                             raise ValueError("workspace import exceeds size limit")
                         out.write(chunk)
-                dest.chmod(0o700 if entry.stat(follow_symlinks=False).st_mode & 0o111 else 0o600)
+                dest.chmod(0o700 if mode & 0o111 else 0o600)
             finally:
                 os.close(fd)
         else:
@@ -66,6 +81,27 @@ class Workspaces:
             exclude=IMPORT_EXCLUDES,
         )
         return workspace_id, root
+
+    def create_coding(self, source: Path, run_id: str) -> tuple[str, Path]:
+        source = source.resolve(strict=True)
+        if not (source / ".git").exists():
+            return self.create(source)
+        if self.root.resolve().is_relative_to(source):
+            raise ValueError("data root must be outside the imported repository")
+        workspace_id = new_id("ws")
+        root = self.root / workspace_id
+        private_directory(root)
+        for name in ("memory", "tools", "scratch", "outputs"):
+            private_directory(root / name)
+        from local_agent.workspace.git import GitWorktrees
+
+        GitWorktrees(self).prepare(source, workspace_id, run_id)
+        return workspace_id, root
+
+    def git_info(self, workspace_id):
+        from local_agent.workspace.git import GitWorktrees
+
+        return GitWorktrees(self).public(workspace_id)
 
     def path(self, workspace_id: str, *, allow_missing: bool = False) -> Path:
         from pydantic import TypeAdapter

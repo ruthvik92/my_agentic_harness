@@ -90,13 +90,19 @@ class Agent:
 
         try:
             with run_lock(self.store.control):
-                return await self._run(
+                result = await self._run(
                     source,
                     task,
                     verify_fixture=verify_fixture,
                     probe=probe,
                     resume_run_id=resume_run_id,
                 )
+                if hasattr(self, "workspace_id"):
+                    git_workspace = self.workspaces.git_info(self.workspace_id)
+                    if git_workspace:
+                        result["git_workspace"] = git_workspace
+                        result["workspace"] = str(self.path)
+                return result
         except RuntimeError:
             if hasattr(self.provider, "close"):
                 await self.provider.close()
@@ -134,6 +140,13 @@ class Agent:
                 self.checkpoint()
                 return None
         diff_ref = await self.final_diff()
+        if self.workspaces.git_info(self.workspace_id):
+            from local_agent.workspace.git import GitWorktrees
+
+            _, diff_workspace_id = self.cached_trusted("final_diff")
+            snapshot = self.workspaces.path(diff_workspace_id) / "scratch" / "candidate"
+            git_workspace = GitWorktrees(self.workspaces).finalize(self.workspace_id, snapshot)
+            self.event("workspace.prepared", "host-git", {"git_workspace": git_workspace})
         status = "verified" if verify_fixture else "completed_unverified"
         self.last = self.store.transition(self.run_id, status, causes=(self.last.event_id,))
         return {
@@ -525,11 +538,14 @@ class Agent:
                         if isinstance(self.provider, ScriptedProvider)
                         else await self.provider.metadata(self.config.model)
                     )
-                    self.workspace_id, self.path = self.workspaces.create(source)
+                    if not probe and self.config.instructions_version.startswith("coder-"):
+                        self.workspace_id, self.path = self.workspaces.create_coding(source, self.run_id)
+                    else:
+                        self.workspace_id, self.path = self.workspaces.create(source)
                     self.baseline = self.store.control / "baselines" / self.workspace_id
                     private_directory(self.baseline.parent)
                     copy_tree(
-                        source,
+                        self.path / "project",
                         self.baseline,
                         exclude=IMPORT_EXCLUDES,
                     )
@@ -545,6 +561,7 @@ class Agent:
                             "capability_report": self.capability_report,
                             "verify_fixture": verify_fixture,
                             "probe": probe,
+                            "git_workspace": self.workspaces.git_info(self.workspace_id),
                         }
                     )
                     self.last = self.store.create_run(
@@ -552,6 +569,7 @@ class Agent:
                             run_id=self.run_id,
                             thread_id=new_id("thread"),
                             workspace_id=self.workspace_id,
+                            source_revision=(self.workspaces.git_info(self.workspace_id) or {}).get("base_commit"),
                             config_ref=config_ref,
                             config_hash=digest(self.store.blobs.read(config_ref)),
                             model_identity=metadata.get("installed", {}).get(

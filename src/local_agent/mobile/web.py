@@ -194,6 +194,7 @@ class BrowserServer(ThreadingHTTPServer):
                     "source_workspace",
                     "workspace",
                     "diff_ref",
+                    "git_workspace",
                 ):
                     if field in job:
                         frozen_fields[field] = job[field]
@@ -347,10 +348,26 @@ class BrowserServer(ThreadingHTTPServer):
             job = self.jobs.get(message.get("job_id"))
             if not job or job.get("thread_id") != thread_id or job.get("mode") != "coding":
                 continue
-            for field in ("mode", "workspace", "source_workspace", "diff_ref"):
+            for field in ("mode", "workspace", "source_workspace", "diff_ref", "git_workspace"):
                 if field in job:
                     message[field] = job[field]
         return display_thread(thread)
+
+    def job_diff(self, job):
+        if not job.get("run_id") or not job.get("diff_ref"):
+            raise ValueError("No captured diff is available for this job")
+        store = Store(self.root, readonly=True)
+        try:
+            refs = [store.blobs.json(row[0]).get("blob_ref") for row in store.db.execute(
+                "SELECT record_ref FROM artifacts WHERE run_id=?", (job["run_id"],)
+            )]
+            if job["diff_ref"] not in refs:
+                raise ValueError("Diff is not an artifact of this run")
+            raw = store.blobs.read(job["diff_ref"])
+            cap = 1024 * 1024
+            return {"content": raw[:cap].decode(errors="replace"), "truncated": len(raw) > cap}
+        finally:
+            store.close()
 
     def thread_events(self, thread_id):
         thread = self.threads.get(thread_id)
@@ -500,10 +517,12 @@ class BrowserHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/jobs":
                 self.respond(200, self.server.jobs.recent())
-            elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})(/events)?", path):
+            elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})(/events|/diff)?", path):
                 job = self.server.jobs.get(match[1])
                 if not job:
                     self.error(404, "Job not found")
+                elif match[2] == "/diff":
+                    self.respond(200, self.server.job_diff(job))
                 elif match[2]:
                     if not job.get("run_id"):
                         self.error(404, "No run trace is available for this job")

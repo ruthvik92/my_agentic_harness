@@ -29,8 +29,13 @@ pins an immutable image ID in `config/sandbox.json`. Rebuild after changing its
 trusted worker or protected verifier. Docker needs cgroup v2, seccomp, and working
 CPU/memory/swap/PID limits; the CLI does not weaken these requirements.
 
-The agent copies the supplied repository. Its final diff is recorded against a
-protected baseline. The original repository is not edited. A general task ends
+For a Git repository root, coding runs create an `agent/ws_<id>` branch and linked
+host worktree from committed `HEAD`. Pending edits in your existing checkout are
+preserved and excluded. Other directories use a copied project. Docker tools edit
+the candidate; its final diff is recorded against a protected baseline and the
+host publishes a candidate commit. Your source checkout is not switched or merged.
+See [Git workspaces](docs/git-workspaces.md) for browser cards and review commands.
+A general task ends
 `completed_unverified`; the supplied calculator, mean and clamp fixtures can earn
 `verified` through protected tests in a fresh workspace.
 

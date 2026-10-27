@@ -209,8 +209,12 @@ but not independent proof.
 
 The final diff is built in a fresh staging workspace against the protected source
 baseline, so changes to the agent's Git history cannot hide edits. Artifacts retain
-their producing execution, bytes and hash. Original repositories are not modified
-and diffs are not automatically applied.
+their producing execution, bytes and hash. Coding against a Git repository root
+uses a linked host worktree on an `agent/ws_<id>` branch, starting from committed
+`HEAD`. The host publishes the captured candidate without changing the source
+checkout or merging it. Other folders retain copied-workspace behavior.
+See [Git workspaces](git-workspaces.md) for container Git isolation, dirty-source
+handling, browser metadata and review/merge instructions.
 
 ## Durability, recovery and cancellation
 
