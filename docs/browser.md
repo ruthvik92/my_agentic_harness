@@ -93,6 +93,18 @@ Coder profiles require an explicit host workspace under the allowed roots
 isolated Docker workspace, and the resulting diff requires review and
 integration before it is applied.
 
+Each coding reply shows **Edited workspace**, including the edited project path
+on the harness computer and a **Copy path** button. The source folder is shown
+for new jobs. These locations remain available when reopening saved chats,
+including older replies whose job record still contains the workspace path.
+On another device, open the copied path on the harness computer or in its IDE;
+it is not a downloadable browser filesystem link.
+
+The source-workspace field grants permission to import that project. Docker gets
+a writable mount of the isolated copy, not the original host directory. Review
+the candidate diff and tests before integrating changes. A completed reply does
+not mean changes have been applied to your source folder.
+
 Analog (circuit) profiles require a case workspace plus a relative PDF path,
 page, and dpi, with an optional context page and normalized region
 `[left, top, right, bottom]`. Circuit runs use the PDF workflow; an uploaded

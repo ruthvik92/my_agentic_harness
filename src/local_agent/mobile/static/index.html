@@ -114,9 +114,9 @@
               <p id="config-status" class="model-run"></p>
             </details>
             <div class="form-group" id="workspace-fields">
-              <label for="workspace-input">Workspace (host path under an allowed root)</label>
+              <label for="workspace-input">Source workspace (host path under an allowed root)</label>
               <input id="workspace-input" type="text" placeholder="/allowed/roots/workspace">
-              <p class="model-run">The workspace is a host path under one of the allowed roots. Coding runs edit a copied workspace; circuit mode requires a PDF.</p>
+              <p class="model-run">Coding runs copy this folder and edit the isolated copy. Results show the edited project path; changes are not automatically applied here. Circuit mode requires a PDF.</p>
               <div class="form-group" id="circuit-fields">
                 <label for="pdf-input">Circuit PDF (relative path)</label>
                 <input id="pdf-input" type="text" placeholder="relative/path/to/schematic.pdf">
@@ -159,6 +159,7 @@
 
     <script nonce="NONCE_VALUE" src="/thread-controls.js"></script>
     <script nonce="NONCE_VALUE" src="/config-controls.js"></script>
+    <script nonce="NONCE_VALUE" src="/workspace-results.js"></script>
     <script nonce="NONCE_VALUE">
 const els = Object.fromEntries(['pairing-panel','pairing-code','login-btn','info-panel','model-display',
   'question','image','preview-container','preview','ask-btn','new-conversation-btn','resume-btn',
@@ -221,6 +222,7 @@ function render() {
       div.appendChild(meta);
     }
     if (assistant) {
+      window.WorkspaceResults.append(div, item);
       const ratings = document.createElement('div'); ratings.className = 'answer-feedback btn-row';
       const label = document.createElement('span'); label.className = 'model-run'; label.textContent = 'Rate this answer:'; ratings.appendChild(label);
       const note = document.createElement('span'); note.className = 'model-run'; note.setAttribute('aria-live', 'polite');

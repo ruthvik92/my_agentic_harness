@@ -51,6 +51,7 @@ class BrowserServer(ThreadingHTTPServer):
             "/": static / "index.html",
             "/thread-controls.js": static / "thread-controls.js",
             "/config-controls.js": static / "config-controls.js",
+            "/workspace-results.js": static / "workspace-results.js",
         }
         # Match the browser assets to this loaded server; edits require a restart.
         self.assets = {route: path.read_bytes() for route, path in self.asset_paths.items()}
@@ -190,6 +191,9 @@ class BrowserServer(ThreadingHTTPServer):
                     "mode",
                     "tools",
                     "instructions_version",
+                    "source_workspace",
+                    "workspace",
+                    "diff_ref",
                 ):
                     if field in job:
                         frozen_fields[field] = job[field]
@@ -334,6 +338,20 @@ class BrowserServer(ThreadingHTTPServer):
             self.threads.update(thread_id, pending_job=job_id)
             return job_id
 
+    def thread_view(self, thread_id):
+        thread = self.threads.get(thread_id)
+        # Older replies predate persisted result locations; their job remains authoritative.
+        for message in thread["messages"]:
+            if message.get("role") != "assistant":
+                continue
+            job = self.jobs.get(message.get("job_id"))
+            if not job or job.get("thread_id") != thread_id or job.get("mode") != "coding":
+                continue
+            for field in ("mode", "workspace", "source_workspace", "diff_ref"):
+                if field in job:
+                    message[field] = job[field]
+        return display_thread(thread)
+
     def thread_events(self, thread_id):
         thread = self.threads.get(thread_id)
         ids = {m["run_id"] for m in thread["messages"] if m.get("run_id")}
@@ -428,7 +446,7 @@ class BrowserHandler(BaseHTTPRequestHandler):
         if not self.boundary():
             return
         path = urlparse(self.path).path
-        if path in ("/thread-controls.js", "/config-controls.js"):
+        if path in ("/thread-controls.js", "/config-controls.js", "/workspace-results.js"):
             script = self.server.assets[path]
             self.respond(200, script, mime="application/javascript")
             return
@@ -478,7 +496,7 @@ class BrowserHandler(BaseHTTPRequestHandler):
                     200,
                     self.server.thread_events(match[1])
                     if match[2]
-                    else display_thread(self.server.threads.get(match[1])),
+                    else self.server.thread_view(match[1]),
                 )
             elif path == "/api/jobs":
                 self.respond(200, self.server.jobs.recent())

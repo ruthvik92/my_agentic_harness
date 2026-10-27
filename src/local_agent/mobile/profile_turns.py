@@ -164,6 +164,8 @@ def submit_profile_turn(server, thread_id, payload):
             "tools": list(cfg.tools),
             "instructions_version": cfg.instructions_version,
         }
+        if request["mode"] == "coding":
+            metadata["source_workspace"] = request["workspace"]
 
         job_id = server.jobs.submit(request, config=cfg, metadata=metadata)
         server.threads.update(thread_id, pending_job=job_id)

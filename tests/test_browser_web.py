@@ -90,6 +90,9 @@ def test_config_editor_and_selected_coder_job(tmp_path):
         helper = client.get("/config-controls.js")
         assert helper.status_code == 200
         assert helper.headers["content-type"].startswith("application/javascript")
+        locations = client.get("/workspace-results.js")
+        assert locations.status_code == 200
+        assert locations.headers["content-type"].startswith("application/javascript")
         assert client.get("/api/configs").status_code == 401
 
         login(server, client)
@@ -191,6 +194,7 @@ def test_config_editor_and_selected_coder_job(tmp_path):
         assert job["answer"] == "ok"
         assert job["audit"] == {"ok": True}
         assert job["workspace"] == "isolated-copy"
+        assert job["source_workspace"] == str(workspace)
         assert job["diff_ref"] == "blob:stub"
         # Frozen config matches the coder profile; tools preserved; coding mode.
         expected_config = load_config(config_dir / "coder.yaml").model_dump(mode="json")
@@ -214,3 +218,15 @@ def test_config_editor_and_selected_coder_job(tmp_path):
         assert final["profile_name"] == job["profile_name"]
         assert final["tools"] == job["tools"]
         assert final["config_hash"] == job["config_hash"]
+        assert final["workspace"] == job["workspace"]
+        assert final["source_workspace"] == str(workspace)
+        # Simulate an older stored reply, whose location exists only in its job record.
+        raw = server.threads.get(thread_id)
+        for message in raw["messages"]:
+            message.pop("workspace", None)
+            message.pop("source_workspace", None)
+        server.threads.update(thread_id, messages=raw["messages"])
+        reopened = client.get(f"/api/threads/{thread_id}").json()
+        old_reply = next(m for m in reopened["messages"] if m["role"] == "assistant")
+        assert old_reply["workspace"] == "isolated-copy"
+        assert old_reply["source_workspace"] == str(workspace)

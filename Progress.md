@@ -61,3 +61,89 @@ Commits separate the preserved product baseline, archive/layout cleanup, and
 configuration migration. No changes were pushed. Restart an already-running
 browser server to load the new Python defaults; saved chats and authoritative
 run data were left in their existing data roots.
+
+## 2026-10-26 — Calculator browser task baseline
+
+Recorded the two files in `tests/fixtures/broken_repo` before the user
+submits the browser coding task. No fixture source or tests were edited.
+
+- `calculator.py`: `add(a, b)` returns `a - b`.
+- `test_calculator.py`: one assertion, `add(2, 3) == 5`.
+- Independent baseline test: **1 failed in 0.01s**, actual result `-1`.
+- Exact source copies, hashes, contents, test result and acceptance criteria:
+  `/home/ruthvik/.local/share/local-agent-development/calculator-browser-check-20261027T050052Z`.
+- Compare the candidate in its returned isolated workspace; the original
+  fixture should keep matching the saved hashes. Candidate must retain the
+  original assertion, add negative/zero/decimal cases and pass pytest.
+
+## 2026-10-26 — Browser calculator attempt blocked by selected-model probe
+
+- Browser job `c4a78e8b69cf2c5f851edd5e55272c9e` selected `qwen3-coder:30b`
+  as an override of `coder.yaml`. Probe `run_44369d22d4cd4a40a71966b6cb2f2c91`
+  ended completed_unverified, but failed the separate capability assessment.
+- Raw Ollama response contained XML-like `read_file` markup in message.content,
+  with no message.tool_calls and done_reason=stop. No model tool was dispatched;
+  the recorded run_command executions were trusted bootstrap/final-diff operations.
+  The calculator coding run did not start (browser job run_id is null).
+- Both original calculator files still match the saved baseline hashes.
+- Independently checked configured default `qwen3:30b-a3b-instruct-2507-q8_0`
+  through the same read-only gate: **passed**, run
+  `run_b9c9de0da09f474f885b86cfb669faad`. Evidence is under
+  `~/.local/share/local-agent-development/calculator-probe-check-20261027T050310Z`.
+  This verifies tool selection/continuation, not completion of the calculator task.
+- Recommended browser retry: select coder.yaml and “Use config model”, then submit
+  the same task. No application code, model settings or capability cache in the
+  browser data root was changed or bypassed. No paid models were invoked.
+
+## 2026-10-26 — Recovered calculator answer after stale browser-schema failure
+
+- Browser job `9cd64fbe344fe30f1b0d2db915f5c931` ran the configured
+  `qwen3:30b-a3b-instruct-2507-q8_0` successfully. Model run
+  `run_e1a1e009ddd04c2f90df6f0df763ba00` is completed_unverified and passes audit.
+  The browser server, still running code loaded at 16:11, failed thread persistence
+  because its old Event schema rejected execution.requested.
+- Confirmed no active/queued jobs, backed up job/thread records, gracefully stopped
+  the stale server, and restored the saved answer through current BrowserServer
+  finish/persistence APIs. No model was called again, and original run events
+  remain identical and audit-valid. The saved answer exists once in the thread.
+- Restarted current browser on the same LAN URL, http://192.168.0.40:8767.
+  Authenticated checks confirmed job completed, thread readable and thread events
+  readable (HTTP 200). New pairing is required; startup log is private and the
+  pairing credential is not recorded here.
+- Backup, recovery record, candidate test evidence and startup log:
+  `~/.local/share/local-agent-development/browser-thread-recovery-20261027T051804Z`.
+- Candidate workspace: `~/.local/share/local-agent/sandboxes/ws_f1040f80cfae4dc28905c970d0e637f4/project`.
+  Independently tested in offline, nonroot, read-only Docker: **1 passed**.
+  The candidate changes add to a+b, but test_calculator.py retains only the
+  original test. The model's claim to have added negative/zero/decimal tests is
+  unsupported. This is partial task success, not all acceptance criteria met.
+  Both original fixture files still match the recorded baseline hashes.
+
+## 2026-10-27 — Browser coding-result workspace visibility
+
+Implemented directly under the user's authorization to improve the browser workflow.
+No local agents or inference were invoked for this change.
+
+- Coding replies now show an Edited workspace panel with the host-side edited
+  project path and Copy path control. New submissions also retain and display
+  their source folder. The workspace input explicitly says it selects a source
+  to copy; the model edits the isolated candidate, not the original host project.
+- Result locations are persisted with new replies. Authenticated thread reads
+  backfill older reply metadata from their corresponding job record, so the
+  existing calculator reply also shows its candidate location after refresh.
+- Paths are rendered as text, not executable HTML or file URLs. Clipboard copying
+  supports both the secure Clipboard API and LAN HTTP's copy/select fallback.
+  Direct writes to the source folder were not enabled: they would require an
+  explicit execution mode and coordination with concurrent host edits.
+- Validation: **373 passed in 121.54s** against the pinned Docker image, including
+  GJS-executed result rendering/clipboard tests and saved-reply API coverage.
+  `uv run --locked ruff check src/local_agent tests scripts` and whitespace checks
+  passed. Trusted worker/image/dependencies unchanged.
+- Gracefully restarted the idle browser to load new assets. The Wi-Fi IP changed
+  since the earlier session, so rebinding 192.168.0.40 failed; the current server
+  is verified at http://192.168.1.22:8767. Authenticated API checks returned 200
+  for the new helper and saved calculator thread; its candidate path exists.
+  New pairing is required. No pairing credential is recorded here.
+- Live verification and private startup logs are under
+  `~/.local/share/local-agent-development/browser-workspace-results-20261027T134459Z`.
+  Saved model answers and original projects were not edited by this UI change.
