@@ -23,6 +23,9 @@ from local_agent.models.scripted import ScriptedProvider
 from local_agent.observability.spans import Spans, correlation
 from local_agent.policy.engine import OFFLINE_HASH, OFFLINE_POLICY, offline_evaluate
 from local_agent.runtime.context import ContextBuilder
+from local_agent.runtime.image_capture import capture_image
+from local_agent.runtime.image_messages import image_messages
+from local_agent.runtime.tool_results import result_preview
 from local_agent.storage.blobs import canonical, digest, private_directory
 from local_agent.storage.database import AuditUnavailable
 from local_agent.tools.registry import VERSIONS, normalize
@@ -62,7 +65,7 @@ class Agent:
         self.store, self.config, self.sandbox = store, config, sandbox
         self.workspaces = Workspaces(store.root)
         self.provider = provider or create_provider(store.blobs, config)
-        self.executor = DockerExecutor(store, self.workspaces, sandbox["image"])
+        self.executor = DockerExecutor(store, self.workspaces, sandbox["image"], settings=config.execution)
         self.spans = Spans()
         self.context = ContextBuilder(store.blobs, config)
         self.turns = self.attempted = 0
@@ -358,19 +361,19 @@ class Agent:
 
                 result = read_evidence(self.store, self.run_id, execution)
             else:
-                result = await self.executor.execute(execution)
+                mode = "ephemeral" if trusted else self.config.execution.execution_mode_default
+                if mode == "persistent":
+                    from local_agent.executor.maintenance import ensure_reaper
+
+                    ensure_reaper(self.store.root, self.sandbox["image"], self.config.execution)
+                result = await self.executor.execute(execution, execution_mode=mode)
+            capture_image(self, execution, result)
             self.last = self.store.execution_event(
                 self.run_id, execution.execution_id, result, causes=(self.last.event_id,)
             )
             self.fault("after_result_commit")
             await self.executor.release(execution.execution_id)
-            preview = {
-                "status": result.status,
-                "exit_code": result.exit_code,
-                "preview": result.preview,
-                "evidence_ref": result.output_ref,
-                "truncated": result.truncated,
-            }
+            preview = result_preview(self.store, result, call.name)
             if result.status != "succeeded":
                 self.failures[decision.normalized_request_hash] += 1
                 if (
@@ -501,7 +504,7 @@ class Agent:
             checkpoint_id=new_id("cp"),
             run_id=self.run_id,
             completed_event_seq=self.last.run_seq,
-            conversation_refs=(self.store.blobs.put_json(self.groups),),
+            conversation_refs=tuple(self.store.blobs.put_json(group) for group in self.groups),
             model_turns=self.turns,
             attempted_calls=self.attempted,
             pending_ids=(),
@@ -528,7 +531,14 @@ class Agent:
                     copy_tree(
                         source,
                         self.baseline,
-                        exclude=(".git", ".venv", ".pytest_cache", "__pycache__"),
+                        exclude=(
+                            ".git",
+                            ".venv",
+                            ".pytest_cache",
+                            "__pycache__",
+                            ".tool-build",
+                            ".browser-build",
+                        ),
                     )
                     config_ref = self.store.blobs.put_json(
                         {
@@ -664,9 +674,10 @@ class Agent:
                     raw = self.store.blobs.json(response.original_response_ref)
                     assistant = assistant_message(raw, response)
                     group = [assistant]
+                    image_execution_ids = []
                     for index, (call, proposal) in enumerate(zip(calls, proposals, strict=True)):
                         try:
-                            preview, _ = await self.dispatch(call, proposal)
+                            preview, result = await self.dispatch(call, proposal)
                         except BudgetExhausted:
                             state = self.store.db.execute(
                                 "SELECT validated_ref,rejected FROM tool_calls WHERE id=?",
@@ -682,6 +693,17 @@ class Agent:
                             )
                             raise
                         group.append(tool_message(call, preview))
+                        if (
+                            result is not None
+                            and result.status == "succeeded"
+                            and call.name in {"render_pdf_region", "view_image"}
+                        ):
+                            image_execution_ids.append(result.execution_id)
+                    group.extend(
+                        image_messages(
+                            self.store, self.run_id, image_execution_ids, self.config.provider
+                        )
+                    )
                     self.groups.append(group)
                     self.checkpoint()
                     if calls:

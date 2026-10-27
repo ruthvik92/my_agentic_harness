@@ -90,3 +90,17 @@ Review exact YAML and load it independently before integration. MCP chooses the
 profile afresh for each new run, so later tasks receive this reviewed setting.
 Task 01's existing draft remains available for verification/correction; no need
 to regenerate it blindly. If source exchanges still exceed budget, split further.
+
+## Completion evidence
+
+Gates 01–19 implemented by local harness agents through MCP, independently reviewed
+and integrated. Gate 08 includes a real Docker captured-helper regression; gate 17
+includes two controller crash/resume tests and crop delivery/export tests. Root
+full suite: 200 passed including Docker, Ruff and whitespace checks clean. Native
+MCP helper run_e09f46eb9501497db74b00f4a921aa5d registered/executed double(21)=42
+with independently passing audit. Native vision read R1 10K from a captured crop.
+Added user-requested trace-input visibility as gate 20: local-authored modelinput
+button follows all three owned evidence hops; GJS functional and actual HTTP
+checks passed. Qwen3.8 and GLM authored accepted portions; Qwen3-coder failed its
+capability behavioral gate. Full authorship and rejected drafts in Progress.md.
+Default coding and analog profile doctor checks both passed with native tool probes.

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Agent Screenshot Chat</title>
+    <title>Local Agent Browser Interface</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 10px; background: #f5f5f5; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -60,7 +60,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Local Agent Screenshot Chat</h1>
+        <h1>Local Agent Browser Interface</h1>
         <div class="pairing" id="pairing-panel">
             <p>Enter pairing code:</p>
             <input id="pairing-code" type="password" autocomplete="off" placeholder="Code printed on your computer" aria-label="Pairing code">
@@ -68,9 +68,11 @@
         </div>
         <div class="form-group hidden" id="info-panel">
             <div id="model-display"></div>
+            <label for="config-select">Agent profile (config)</label><select id="config-select"></select>
+            <p id="config-detail" class="model-run"></p>
             <label for="thread-select">Saved chats (history)</label><select id="thread-select"><option value="">New chat</option></select>
             <p id="history-note" class="model-run"></p>
-            <label for="model-select">Image interpretation / chat model</label><select id="model-select"></select>
+            <label for="model-select">Model override (optional)</label><select id="model-select"></select>
             <label for="inference-select">Netlist inference model (text)</label><select id="inference-select"></select>
             <label for="reviewer-select">OpenAI reviewer (paid)</label><select id="reviewer-select"></select>
             <button type="button" id="refresh-models">Refresh model catalogs</button>
@@ -88,12 +90,52 @@
               <button type="button" id="thumb-up" aria-label="Thumbs up">👍</button>
               <button type="button" id="thumb-down" aria-label="Thumbs down">👎</button>
             </div><p id="verifier-note" class="model-run"></p>
+            <details id="config-editor-panel"><summary>Agent profile editor</summary>
+              <div class="form-group">
+                <label for="config-editor-file">Profile file</label>
+                <select id="config-editor-file"></select>
+              </div>
+              <div class="form-group">
+                <label for="config-name">Profile name</label>
+                <input id="config-name" type="text" placeholder="profile.yaml">
+              </div>
+              <div class="form-group">
+                <label for="config-content">Profile content</label>
+                <textarea id="config-content" rows="16" style="font-family:monospace" placeholder="# agent profile YAML or JSON"></textarea>
+              </div>
+              <div class="btn-row">
+                <button type="button" id="config-new">New</button>
+                <button type="button" id="config-clone">Clone</button>
+                <button type="button" id="config-load">Load</button>
+                <button type="button" id="config-validate">Validate</button>
+                <button type="button" id="config-save">Save</button>
+                <button type="button" id="config-refresh">Refresh configs</button>
+              </div>
+              <p id="config-status" class="model-run"></p>
+            </details>
+            <div class="form-group" id="workspace-fields">
+              <label for="workspace-input">Workspace (host path under an allowed root)</label>
+              <input id="workspace-input" type="text" placeholder="/allowed/roots/workspace">
+              <p class="model-run">The workspace is a host path under one of the allowed roots. Coding runs edit a copied workspace; circuit mode requires a PDF.</p>
+              <div class="form-group" id="circuit-fields">
+                <label for="pdf-input">Circuit PDF (relative path)</label>
+                <input id="pdf-input" type="text" placeholder="relative/path/to/schematic.pdf">
+                <label for="page-input">Page</label>
+                <input id="page-input" type="number" min="1" value="1">
+                <label for="dpi-input">DPI (72–1200)</label>
+                <input id="dpi-input" type="number" min="72" max="1200" value="300">
+                <label for="context-page-input">Context page (optional)</label>
+                <input id="context-page-input" type="number" min="1" placeholder="optional">
+                <label for="region-input">Region (optional, left,top,right,bottom)</label>
+                <input id="region-input" type="text" placeholder="0,0,1,1">
+              </div>
+            </div>
         </div>
         <div class="form-group">
             <label for="question">Question:</label>
-            <textarea id="question" placeholder="Describe what you want to know about the screenshot..." maxlength="8000"></textarea>
+            <textarea id="question" placeholder="Ask about the screenshot or the selected workspace..." maxlength="8000"></textarea>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="image-fields">
             <label for="image">Schematic image:</label>
             <input type="file" id="image" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.gif,.heic,.heif,.tif,.tiff">
             <p class="model-run">Choose an image up to 20 MiB. Large or other decodable images are prepared to fit the upload limits. If Photos says “Unable to load”, save the crop locally and choose it from Files/Browse.</p>
@@ -116,11 +158,12 @@
     </div>
 
     <script nonce="NONCE_VALUE" src="/thread-controls.js"></script>
+    <script nonce="NONCE_VALUE" src="/config-controls.js"></script>
     <script nonce="NONCE_VALUE">
 const els = Object.fromEntries(['pairing-panel','pairing-code','login-btn','info-panel','model-display',
   'question','image','preview-container','preview','ask-btn','new-conversation-btn','resume-btn',
   'status','error-banner','transcript','trace-toggle','trace','run-display','context-note',
-  'thread-select','model-select','inference-select','refresh-models','breakdown','netlist-btn','verify-btn','thumb-up','thumb-down','verifier-note','reviewer-select','history-note','thread-usage','all-usage','refresh-usage']
+  'thread-select','model-select','inference-select','refresh-models','breakdown','netlist-btn','verify-btn','thumb-up','thumb-down','verifier-note','reviewer-select','history-note','thread-usage','all-usage','refresh-usage','config-select']
   .map(id => [id, document.getElementById(id)]));
 let currentJobId = null, lastJobId = null, activeQuestion = '', image = null;
 let currentThreadId = null, threadData = null, catalog = null;
@@ -136,7 +179,7 @@ function showError(message) { els['error-banner'].textContent = message; els['er
 function clearError() { els['error-banner'].classList.add('hidden'); }
 function busy(value) {
   els['ask-btn'].disabled = value || !paired;
-  els.image.disabled = value;
+  els.image.disabled = value || (window.ConfigControls && typeof window.ConfigControls.mode === 'function' && window.ConfigControls.mode() === 'circuit');
   for (const id of ['model-select','inference-select','reviewer-select','thread-select','refresh-models']) els[id].disabled = value || !paired;
   els['netlist-btn'].disabled = value || !paired || !currentThreadId;
   els['verify-btn'].disabled = value || !paired || !currentThreadId || !catalog?.verifier.enabled || !els['reviewer-select'].value;
@@ -145,6 +188,7 @@ function busy(value) {
   for (const button of document.querySelectorAll('.answer-feedback button')) button.disabled = value || !paired || !button.dataset.answerId || answerVotesPending.has(button.dataset.answerId);
   els['new-conversation-btn'].disabled = value;
   els['resume-btn'].disabled = !currentJobId || polling || !paired;
+  if (window.ConfigControls && typeof window.ConfigControls.busy === 'function') window.ConfigControls.busy(value || !paired);
 }
 function render() {
   els.transcript.replaceChildren();
@@ -169,7 +213,11 @@ function render() {
     } else div.textContent = 'You: ' + item.content;
     if (assistant && item.model) {
       const meta = document.createElement('div'); meta.className = 'model-run';
-      meta.textContent = item.model + ' · ' + (item.provider || 'recorded') + ' · Run: ' + (item.run_id || 'not created') + ' · unverified';
+      let metaText = item.model + ' · ' + (item.provider || 'recorded') + ' · Run: ' + (item.run_id || 'not created') + ' · unverified';
+      if (item.profile_name) metaText += ' · profile: ' + item.profile_name;
+      if (item.mode) metaText += ' · mode: ' + item.mode;
+      if (item.tools) metaText += ' · tools: ' + (Array.isArray(item.tools) ? item.tools.join(', ') : item.tools);
+      meta.textContent = metaText;
       div.appendChild(meta);
     }
     if (assistant) {
@@ -228,11 +276,11 @@ async function api(path, data) {
 }
 async function refreshModels() {
   catalog = await api('/models');
-  for (const id of ['model-select','inference-select']) {
-    const selected = els[id].value || storage.get(id) || catalog.default_id;
-    ThreadControls.catalogOptions(els[id], catalog.models, selected);
-  }
+  // Legacy inference/reviewer paths unchanged
+  ThreadControls.catalogOptions(els['inference-select'], catalog.models, els['inference-select'].value || storage.get('inference-select') || catalog.default_id);
   ThreadControls.catalogOptions(els['reviewer-select'], catalog.verifier.models || [], els['reviewer-select'].value || storage.get('reviewer-select') || catalog.verifier.default_id);
+  // Answer model-select is managed by ConfigControls (config-default blank option + same-provider overrides)
+  if (window.ConfigControls) window.ConfigControls.models(catalog.models);
   if (catalog.error || catalog.verifier.error) showError(catalog.error || catalog.verifier.error);
   busy(!!currentJobId || uploading);
 }
@@ -285,9 +333,10 @@ async function info() {
   paired = true;
   els['pairing-panel'].classList.add('hidden');
   els['info-panel'].classList.remove('hidden');
-  els['model-display'].textContent = 'Local owner · terminal pairing (not OAuth) · uploads and chat; no local file tools';
-  if (value.restart_required) showError('The phone app was updated on the computer. Restart its phone server, then reload this page and pair again.');
+  els['model-display'].textContent = 'Local owner · browser interface (terminal pairing, not OAuth) · uploads and chat; selected profile details show tools.';
+  if (value.restart_required) showError('The browser server was updated on the computer. Restart the browser server, then reload this page and pair again.');
   await refreshModels();
+  if (window.ConfigControls) await ConfigControls.refresh(value.default_profile, value.allowed_roots);
   const saved = currentThreadId || storage.get('threadId');
   if (saved) await openThread(saved);
   else { await refreshThreads(); await refreshUsage(); }
@@ -315,8 +364,10 @@ async function ask(kind='answer') {
     if (kind === 'review') { request = {model_id:els['reviewer-select'].value}; endpoint = 'review'; }
     else if (kind === 'netlist') { request = {model_id:els['inference-select'].value}; endpoint = 'netlist'; }
     else {
-      request = {question, model_id:els['model-select'].value}; endpoint = 'ask';
-      if (image) request.image = image;
+      request = {question, ...ConfigControls.requestFields()};
+      if (els['model-select'].value) request.model_id = els['model-select'].value;
+      if (image && ConfigControls.mode() !== 'circuit') request.image = image;
+      endpoint = 'ask';
     }
     const value = await api('/threads/' + currentThreadId + '/' + endpoint, request);
     currentJobId = value.job_id; activeQuestion = kind === 'answer' ? question : kind === 'review' ? 'Paid OpenAI review' : 'Draft netlist inference';
@@ -377,7 +428,7 @@ async function prepareImage(file) {
     const reader = new FileReader();
     const timer = setTimeout(() => reader.abort(), 30000);
     reader.onload = () => { clearTimeout(timer); resolve(reader.result); };
-    reader.onerror = () => { clearTimeout(timer); reject(new Error('Cannot read this file from the phone. Download/save a local copy, then select it from Files/Browse.')); };
+    reader.onerror = () => { clearTimeout(timer); reject(new Error('Cannot read this file in this browser. Download/save a local copy, then select it from Files/Browse.')); };
     reader.onabort = () => { clearTimeout(timer); reject(new Error('Reading the image timed out. Save it locally and try Files/Browse.')); };
     reader.readAsDataURL(file);
   });
@@ -456,18 +507,27 @@ els['reviewer-select'].addEventListener('change', ()=>{storage.set('reviewer-sel
 els['verify-btn'].addEventListener('click', () => ask('review'));
 els['refresh-models'].addEventListener('click', async () => { try { await api('/models/refresh', {}); await refreshModels(); } catch (error) { showError(error.message); } });
 els['thread-select'].addEventListener('change', async () => { if (!els['thread-select'].value) { clearConversation(); return; } try { await openThread(els['thread-select'].value); } catch (error) { showError(error.message); } });
-for (const id of ['model-select','inference-select']) els[id].addEventListener('change', () => storage.set(id, els[id].value));
+els['model-select'].addEventListener('change', () => { storage.set('model-select', els['model-select'].value); });
+els['inference-select'].addEventListener('change', () => storage.set('inference-select', els['inference-select'].value));
+els['config-select'].addEventListener('change', () => { els['model-select'].value = ''; storage.remove('model-select'); if (window.ConfigControls) ConfigControls.busy(!!currentJobId || uploading); });
 for (const [id,vote] of [['thumb-up','up'],['thumb-down','down']]) els[id].addEventListener('click', async () => { try { threadData = await api('/threads/' + currentThreadId + '/feedback', {vote:threadData?.feedback === vote ? null : vote}); breakdown(); } catch (error) { showError(error.message); } });
 els['new-conversation-btn'].addEventListener('click', clearConversation);
 els['resume-btn'].addEventListener('click', poll);
 els.image.addEventListener('change', selectImage);
 els['trace-toggle'].addEventListener('click', trace);
 async function initialize() {
-  if (!window.ThreadControls || typeof window.ThreadControls.catalogOptions !== 'function') {
-    showError('Model controls could not load. Reload this page. If this continues, restart the phone server on the computer, then reload and pair again.');
+  if (!window.ThreadControls || typeof window.ThreadControls.catalogOptions !== 'function' ||
+      !window.ConfigControls || typeof window.ConfigControls.init !== 'function' ||
+      typeof window.ConfigControls.models !== 'function' ||
+      typeof window.ConfigControls.refresh !== 'function' ||
+      typeof window.ConfigControls.busy !== 'function' ||
+      typeof window.ConfigControls.requestFields !== 'function' ||
+      typeof window.ConfigControls.mode !== 'function') {
+    showError('Browser controls could not load. Reload this page. If this continues, restart the browser server on the computer, then reload and pair again.');
     status('Browser controls unavailable.'); busy(false); els['login-btn'].disabled = true;
     return;
   }
+  ConfigControls.init(api, showError, () => { if (catalog) ConfigControls.models(catalog.models); busy(!!currentJobId || uploading); });
   const saved = storage.get('currentJobId');
   if (saved && /^[0-9a-f]{32}$/.test(saved)) {
     currentJobId = saved; activeQuestion = storage.get('activeQuestion') || 'Saved question';

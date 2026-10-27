@@ -37,6 +37,10 @@ async def build_image(base="mirror.gcr.io/library/python:3.12-slim-bookworm"):
         "worker_hash": digest((repository / "src/local_agent/executor/worker.py").read_bytes()),
         "pdf_helper_hash": digest((repository / "sandbox/pdf_extract.py").read_bytes()),
         "verifier_hash": digest((repository / "sandbox/verify.py").read_bytes()),
+        "toolkit_hashes": {
+            p.name: digest(p.read_bytes())
+            for p in sorted((repository / "src/local_agent/executor/toolkit").glob("*.py"))
+        },
     }
     directory = repository / "config"
     directory.mkdir(exist_ok=True)

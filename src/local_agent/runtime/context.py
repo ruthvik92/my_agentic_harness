@@ -1,8 +1,24 @@
 import math
 
 from local_agent.contracts import ContextSnapshot
-from local_agent.storage.blobs import canonical, digest
+from local_agent.storage.blobs import MAX_BLOB_BYTES, canonical, digest
 from local_agent.tools.registry import definitions
+
+
+def contains_images(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "images" and item:
+                return True
+            if key == "image_url":
+                return True
+            if contains_images(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            if contains_images(item):
+                return True
+    return False
 
 
 def estimate(payload):
@@ -77,15 +93,28 @@ class ContextBuilder:
             return result
 
         budget = self.config.window_tokens - self.config.output_reserve_tokens
-        if estimate(payload([])) > budget:
+        wire_budget = MAX_BLOB_BYTES - 65536
+
+        def fits(wire):
+            return (
+                estimate(wire) <= budget
+                and len(canonical(wire)) <= wire_budget
+            )
+
+        if not fits(payload([])):
             raise ValueError("fixed instructions and schemas exceed the input context budget")
         chosen = []
         excluded = []
-        for group in reversed(groups):
+        for index, group in enumerate(reversed(groups)):
             candidate = [group, *chosen]
-            if estimate(payload(candidate)) <= budget:
+            if fits(payload(candidate)):
                 chosen = candidate
             else:
+                if index == 0 and contains_images(group):
+                    raise ValueError(
+                        "latest image tool exchange exceeds context/transport budget; "
+                        "request fewer or smaller crops"
+                    )
                 excluded.append({"source_ref": self.blobs.put_json(group), "reason": "over_budget"})
         self.summary_ref = None
         summary = None
@@ -117,7 +146,7 @@ class ContextBuilder:
                 from local_agent.models.openai import wire_messages
 
                 augmented["messages"] = wire_messages(augmented["messages"])
-            if estimate(augmented) <= budget:
+            if fits(augmented):
                 wire = augmented
         ref = self.blobs.put_json(wire)
         snapshot = ContextSnapshot(

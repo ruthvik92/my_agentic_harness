@@ -17,7 +17,9 @@ from local_agent.storage.database import Store
 
 def test_compaction_has_hashed_lineage_and_keeps_constraints(tmp_path):
     store = Store(tmp_path / "data")
-    config = load_config(Path("config/coder.yaml"))
+    config = load_config(Path("config/coder.yaml")).model_copy(
+        update={"window_tokens": 8192, "output_reserve_tokens": 2048}
+    )
     builder = ContextBuilder(store.blobs, config)
     fixed = [{"role": "system", "content": "Immutable offline constraints"}]
     group = [{"role": "assistant", "content": "x" * 8000}, {"role": "tool", "content": "y" * 8000}]

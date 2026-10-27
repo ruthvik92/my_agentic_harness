@@ -56,17 +56,27 @@ class Workspaces:
         for name in ("memory", "tools", "scratch", "outputs"):
             private_directory(root / name)
         copy_tree(
-            source, root / "project", exclude=(".git", ".venv", "__pycache__", ".pytest_cache")
+            source,
+            root / "project",
+            exclude=(
+                ".git",
+                ".venv",
+                "__pycache__",
+                ".pytest_cache",
+                ".tool-build",
+                ".browser-build",
+            ),
         )
         return workspace_id, root
 
-    def path(self, workspace_id: str) -> Path:
+    def path(self, workspace_id: str, *, allow_missing: bool = False) -> Path:
         from pydantic import TypeAdapter
 
         from local_agent.contracts import ID
 
         TypeAdapter(ID).validate_python(workspace_id)
         path = self.root / workspace_id
-        if path.is_symlink() or not path.is_dir():
+        # Cleanup may validate a now-missing workspace's mount identity; execution may not.
+        if path.is_symlink() or (not path.is_dir() and not (allow_missing and not path.exists())):
             raise ValueError("workspace missing or invalid")
         return path

@@ -7,6 +7,8 @@ RUN apt-get -o Acquire::ForceIPv4=true update && apt-get -o Acquire::ForceIPv4=t
     && rm -rf /var/lib/apt/lists/*
 COPY sandbox/pdf_extract.py /opt/local-agent/pdf_extract.py
 COPY src/local_agent/executor/worker.py /opt/local-agent/worker.py
+COPY src/local_agent/executor/toolkit /opt/local-agent/toolkit
+RUN chmod -R a+rX /opt/local-agent/toolkit
 COPY sandbox/verify.py /opt/local-agent/verify.py
 RUN chmod 0555 /opt/local-agent/worker.py
 USER 1000:1000

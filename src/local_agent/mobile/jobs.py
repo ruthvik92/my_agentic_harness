@@ -34,9 +34,10 @@ def publish(path, value):
 
 
 class Jobs:
-    def __init__(self, root, agent_path, config, runner=None, on_result=None):
+    def __init__(self, root, agent_path, config, runner=None, on_result=None, allowed_roots=None):
         self.root, self.agent_path, self.config = Path(root), Path(agent_path).absolute(), config
         self.on_result = on_result
+        self.allowed_roots = tuple(Path(root).resolve() for root in (allowed_roots if allowed_roots is not None else [Path.cwd()]))
         private_directory(self.root)
         private_directory(self.root / "phone")
         self.directory = self.root / "phone" / "jobs"
@@ -56,7 +57,7 @@ class Jobs:
             self.lock = threading.Lock()
             self.stopping = False
             self.runner = runner or self.execute
-            self.worker = threading.Thread(target=self.work, name="phone-jobs", daemon=False)
+            self.worker = threading.Thread(target=self.work, name="browser-jobs", daemon=False)
             self.worker.start()
         except BaseException:
             self.lease.__exit__(*sys.exc_info())
@@ -80,7 +81,7 @@ class Jobs:
             if self.stopping or self.pending.full():
                 raise RuntimeError("Queue is full; wait for an active question to finish.")
             if sum(bool(JOB_ID.fullmatch(p.name)) for p in self.directory.iterdir()) >= 1000:
-                raise RuntimeError("Phone job storage limit reached (1000 jobs).")
+                raise RuntimeError("Browser job storage limit reached (1000 jobs).")
             job_id = secrets.token_hex(16)
             directory = self.directory / job_id
             private_directory(directory)
@@ -108,18 +109,23 @@ class Jobs:
         from local_agent.config import load_config
 
         chosen = load_config(chosen_path)
+        request = json.loads(read_evidence(request_path.parent, request_path.name, 6 * 1024 * 1024))
+        command = "browser-run" if isinstance(request, dict) and "mode" in request else "screenshot"
         argv = [
             sys.executable,
             "-m",
             "local_agent.cli",
             "--data-root",
             str(self.root),
-            "screenshot",
+            command,
             "--agent",
             str(chosen_path),
             "--request",
             str(request_path),
         ]
+        if command == "browser-run":
+            for root in self.allowed_roots:
+                argv.extend(["--allow-root", str(root)])
         result = subprocess.run(
             argv,
             capture_output=True,
@@ -131,10 +137,10 @@ class Jobs:
             output = json.loads(result.stdout)
         except ValueError as exc:
             raise RuntimeError(
-                "Screenshot controller returned no valid result: " + result.stderr[-2000:]
+                "Browser controller returned no valid result: " + result.stderr[-2000:]
             ) from exc
         if not isinstance(output, dict):
-            raise RuntimeError("Screenshot controller returned an invalid result")
+            raise RuntimeError("Browser controller returned an invalid result")
         return output
 
     def work(self):
@@ -159,6 +165,17 @@ class Jobs:
                         answer=result.get("answer"),
                         error=result.get("error"),
                     )
+                    for field in (
+                        "workspace",
+                        "workspace_id",
+                        "diff_ref",
+                        "exported_case",
+                        "circuit",
+                        "audit",
+                        "capability_probe",
+                    ):
+                        if field in result:
+                            job[field] = result[field]
                     audit_ok = result.get("audit", {"ok": True}).get("ok")
                     ok = (
                         result.get("status") == "completed_unverified"

@@ -1549,3 +1549,413 @@ Final-stage supervision:
 - Crash-driver task run_0090756e6c8544198874252b83e04c27 exhausted repeated
   git-show inspection without writing. Split copy, source/tool change and hook
   filtering into separate edits; crash image verification remains pending.
+- Full assembled suite, including pinned Docker: 197 passed in 72.98s.
+- Crash driver copy run_d0cb84b154e548f5a38e91ec914d1e7d completed_unverified;
+  exact original driver copy reviewed before separate image-specific edits.
+- New image recovery driver run_4c28de43e33347a88067444de0ee873d and regression
+  draft run_dfdbad4adef9466ebc7895c45f9a04d4 reviewed; correction
+  run_a73368e000854d35818616adb0430a75 fixed imports/API and a tautological
+  assertion. Independent Docker crash-recovery checks: 2 passed. New test import
+  ordering still needs local-author lint correction.
+- User asked about model inputs and Docker/host boundary. Phone profile intentionally
+  supplies no execution tools; phone-v1 instructions explicitly say so. Host writes
+  DB/blob/export traces and sends model messages/schemas; Docker receives a single
+  validated ExecutionRequest over stdin, baked worker dispatch and workspace mount.
+  Exact inputs exist behind model.requested -> request_ref -> context_ref -> payload_ref.
+- User authorized two local LLMs. Tried qwen3-coder:30b; native probe run completed
+  but behavioral gate failed (run_9dc31ff120ee44a8a694bc0fadc13a3b,
+  run_08730ab7523d4ad8a55930c5a1918573, run_4d88a70d2ca1449c83955c93076b484e).
+  MCP masked CLI error as missing run_id; diagnostic CLI output confirmed actual
+  capability failure. This is not an authored feature success. Concurrent coding
+  attempts also encounter shared run lock, so tasks remain sequential.
+  Trying glm-4.7-flash:q8_0 for a small visible model-input trace button.
+- GLM native probe run_3d1bcbbd0e4945a88829068f5de4f279 passed; trace UI draft
+  run_5394692624ac475da325bb20680e5573 authored by glm-4.7-flash:q8_0. Review
+  found only two evidence hops, wrong tool-count target and a missing JS brace.
+  GLM correction run_05f1cd597e734725a028b5cc9a74fab5 budget-exhausted on exact
+  patches; no accepted edits. Sent concrete marker-based rewrite to Qwen.
+- GLM docs run_07f301a6cc814e19a9e16bb71d0e475f reviewed; Qwen correction and
+  Docker helper test run_dcaeced22c89436e8279c0ec53c29988 fixed internal-vs-MCP
+  tool names and input payload wording. Docker test draft failed create-only
+  validation; sending literal creation/hash format corrections (implementation
+  unchanged; these are test assumptions).
+- Native local vision check used real captured crop and reviewed image_messages
+  Ollama encoding from Docker circuit run_86eb39b20fc345e7b82c288db0cd7fd6,
+  execution exec_a085113f9819414f960c434ba731d21b. Qwen3.8 read 'R1 10K' from
+  pixels; request/response saved .tool-build/mcp/review/native-vision-*.json.
+  This verifies vision access/text readability, not schematic classification accuracy.
+- Reviewed core authored changes integrated into root working tree (39 exact files)
+  plus previously verified generated sandbox.json. Source lint passed in root.
+  Root analog doctor passed all kernel/storage/telemetry checks with 11-tool native
+  capability probe run_34337bd6562b4dd89fa8856fd7085af8 and sandbox probe
+  run_2492d75fa3764b2faf5fe1914d8c620a. Image sha256:30954288105c2934db8d34b2b6b3187376d044db4aec40f79193ba78669036fd.
+- Trace rewrite run_9fcb932f105d40de909876b2bb112ca5 corrected syntax/imports
+  but still skipped a context hop; rejected. GLM hop run_78e28b3b82eb4b898c051c7b790cba83
+  failed Ollama500 after partial invalid edit, rejected. Narrowed snapshot to exact
+  extracted render() function. Qwen run_3a17b0816bda43379d1353d12fda73d0 adds
+  correct three hops but dropped one closing brace; one-character follow-up sent.
+  Codex integrates exact local-authored function into original HTML; no handwritten
+  implementation. JS functional checks pending final brace correction.
+- Helper test correction GLM run_5ec8bebc1765461d9f159c4d1ca72004 fixed creation
+  but ignored hash-prefix requirement; Docker assertion exposed mismatch. Qwen
+  run_369809831a504cca8e957e1fd17341b4 exact hash correction reviewed/integrated;
+  final Docker regression executing. This is a test correction, not production change.
+- Trace final brace correction run_ad30dc193da54ec582654cc1f5e6a318 reviewed;
+  integrated exact function authored across GLM/Qwen drafts and corrections.
+  Independent GJS verification passed: exact wire messages, three evidence hops,
+  captured source/run routing, absent/empty tool explanations, invalid refs,
+  and stale selection. Actual HTTP evidence ownership chain passed against MCP
+  run_5394692624ac475da325bb20680e5573; system instructions and 9 native schemas
+  visible. Existing browser ownership/security routes unchanged.
+- Final helper Docker regression: 1 passed. Source mutation does not affect captured
+  execution; strict bool rejection, duplicate/reserved names and stdout provenance.
+- Fresh root MCP native helper smoke run_e09f46eb9501497db74b00f4a921aa5d,
+  qwen3.8:27b, completed_unverified. Actual register_tool and execute_tool succeeded;
+  captured stdout includes name/version/code_sha256 and {"result":42}.
+  Independent read of execution records and audit passed. No project edits in smoke.
+- Root full suite with pinned Docker: 200 passed in 83.62s. Root Ruff passed;
+  git diff --check clean. Reviewed image/helper/runtime/profile/doc changes and trace
+  UI integrated; source authored by real local harness runs via MCP. Codex authored
+  briefs, review notes, supervision utilities, exact integration and verification only.
+- Trace root for MCP builds: /home/ruthvik/.local/share/local-agent-mcp;
+  derived event exports control/runs/<run_id>/events.jsonl, authoritative agent.db
+  and blobs under control. Host owns trace writes, Docker can modify only bind-mounted
+  workspace. Refresh trace UI HTML; restart existing MCP process/IDE session to
+  reload cached Python tool/instruction modules. Phone-v1 remains screenshot mode
+  tools=[], explicitly described in config and instructions. No phone workspace or
+  execution feature was requested/added.
+
+- Final default coder doctor passed all checks. Native 9-tool capability probe
+  run_355723fdc22649d491dad67104f4a0b0 used configured local
+  qwen3:30b-a3b-instruct-2507-q8_0; sandbox probe run_fe9c51a6276e40c495a1e7f2fc033c8c.
+  Both default profiles now verified; no default model change. Final exact integration
+  comparison: 41 reviewed files, zero mismatches. All planned acceptance gates complete.
+
+## Browser interface/profile editor work (2026-10-09)
+
+User requested public browser naming, selecting any config, creation/editing in the
+browser, and documentation of all configurations. Existing docs are incomplete:
+phone guide plus MCP coder/analog sections, without a full config reference.
+Plan: docs/browser-interface-build-plan.md. Preserved prior uncommitted feature work;
+isolated current source snapshot .browser-build/assembled; author tasks via native
+MCP qwen3.8/GLM only. No paid model test calls. First task: profile validation.
+- Initial profile validator run_0cc7c8fdf3c44e748b2f3ea91db3f468 exhausted failed
+  imports in partial snapshot; GLM run_68c7e76bf4a44767b987da2399e02ddf looped
+  searching nonexistent symbols, no accepted source. Default Qwen3 metadata
+  run_92a1f4b002404550ba7212976c1e0753 and draft validator
+  run_7072c957b5304f6ab8eaa2aa40c256cb completed_unverified but review rejected
+  wrong signatures, self imports and invalid config assumptions. Switched back to
+  Qwen3.8 with complete source/offline Python3.12 wheels, explicit review findings
+  and actual existing-config checks. No rejected drafts integrated.
+- Complete-source validator retry run_88630f53dda148c39f781587fa37a9e6 exhausted
+  discovery with no edits. Switched to literal correction microtasks:
+  run_2f95810f2516413880064cc646742de0 (imports/name),
+  run_25e04a1b663a42dfbb7f2ff7bfe30eeb (filename argument),
+  run_9e4a8c8dbaae40428e3e48db2a4236fe (image/schema/errors).
+  Exact resulting validator reviewed and staged. Independent all6 configs passed;
+  malformed scalar/unknown tool/whitespace/bool schema errors rejected; Ruff passed.
+  Product source remains isolated until complete browser flow is verified.
+- GLM config documentation run_2621f6d226364751ba4380fac09519c9 wrote a draft but
+  exhausted repeated create-only README replacements. Review found wrong analog
+  CLI example/field descriptions; concrete docs-only corrections prepared.
+- Config read helper run_0573fade66e74dd4a24908b1214c7507 compiled, but independent
+  read check found incorrect os.path.isfile(mode) and leaked directory fd.
+  Draft not staged; fixes assigned separately from atomic write addition.
+- Secure read correction run_eeb17be83bbc4d269346eb83e3dc0f88 reviewed.
+  Independent traversal/symlink/FIFO/oversize rejection and 100-read FD count passed.
+- Atomic-save runs run_0f0da03e32a44d76946e97439052cdff (failed missing import)
+  and run_3ff22eca846e418e80f4f520219ada52 (draft failed temp-name/open flags)
+  both budget-exhausted. Draft reviewed; follow-ups fix temp creation, conflict
+  errors, update branch and profile-count logic. No draft writes to root config.
+
+- Atomic publication/count correction run_c6e817dc7dbb44e788f85c9a3cfa9d77 reviewed: exclusive creation, hash replacement, five concurrent writers, profile limits and cleanup passed independent checks.
+- Catalog run_ec59c385f1fc457fba8cabbb7c70a495 exhausted turns after writing a draft. Micro correction run_c59ad2c1700f4fed96d88052d8e40c87 completed_unverified (qwen3.8:27b); exact files reviewed into isolated assembled/staging. All six config loads, create/update/conflict/invalid repair and unsafe-name exclusion passed independently. Authenticated API authoring is next.
+- Config API run_6cdcf9eaeb8b479da2428c4e906f4355 and correction run_bc7edffe0f8040a6b029af06108f8eb3 (qwen3.8:27b) reviewed. Independent pairing/Origin/create/conflict/invalid API checks passed. Sandbox scalar JSON rejected after review correction.
+- Request validator run_63cced0eda6d4656938bb1d365001ec3 and microfix run_2f306eea9ef44f879e4b046a67599cdc reviewed. Chat/coding/PDF routing, trusted roots, bool page, missing PDF and null/NaN region checks passed.
+- Browser capture adapter run_9ce83327268e45128e66dca018d3e697 plus event/bundle registration run_41902d18ae514bac85d9f6b6a60c67c8 reviewed. Independent captured image/history/provider-message/audit checks passed; native Docker read_file/view_image smoke completed_unverified with audit.ok. Browser default config/instructions run_359ad22012434925839d84acd1e1bdc3 preserves original PHONE_INSTRUCTIONS bytes.
+- Dispatcher run_cb6f28f93fa14b9896d19900ef7c679f exhausted repeated searches for an omitted BrowserAgent dependency; added named dependency files to isolated snapshot and launched retry. Config-guide correction delegated to GLM in separate root ~/.local/share/local-agent-browser-docs. Product changes remain isolated pending full browser flow validation.
+- Broad dispatcher retry run_bcb5d518a831414a8a6b3e048671fa2a exhausted repeated reads. Minimal contract task run_032f36b66d2d426a98ff0598fc74a371 produced draft; corrected native API usage via run_d8e61f79584e4de199d3b8622d3fe2ef and basic-request subset via run_e9975d0fe57f428692135c66f8466dcb. Independent browser/phone/coder native dispatch passed with audits; import-failure result enrichment needs correction.
+- Profile turns run_cdd0955e4a2f4fffa42a96ad24f0b921 drafted incorrect dict/tuple/image APIs. Follow-up run_43bc0ab49828409895e0358d6fbd4120 corrected them; independent selected config/tool preservation, frozen config, pending job rejection and provider guard passed.
+- Archive exclusion run_9700075b20ce4fca94ed3b76600f6b05 reviewed and independently checked. Both workspace and baseline copies exclude internal .tool-build/.browser-build; source bounds remain unchanged.
+- GLM docs correction run_22e039d995704423af5cc2cdf2eb8836 failed transport after incomplete duplicate edits. Qwen rewrite run_02a6d74520f54fcfb9449a7d3f05cda0 produced clean guide; final fact/example corrections assigned.
+- Browser controls run_fb7a3341445a484ba2e8ce29772456f5 wrote draft then exhausted identical missing JS-interpreter package imports. API-shape, visibility/model/clone/region review findings assigned; no JS dependencies added. Supervisor will check with host GJS.
+- CLI/launcher run_b5f1427a3dd24e599a79c58335ab440d corrected imports/default verifier via run_e8fe8f13bc06495a85cf5a90a00fa388. Independent browser-web help/launcher help passed. Frozen browser-vs-legacy subprocess route run_a4027e1574f2413096e79636b0d25a4b passed mocked checks; artifact retention follow-up remains.
+- Broad server run_22015067b27e44d9aac616a1f98a9286 exhausted missing package import attempts with no edits. Small constructor/naming run_a34c820ab2d948f79a4aaf5a595cee77 reviewed; BrowserServer/Handler aliases preserve old imports. Profile routing broad run_eb55b484a59b4489b64d65509932ce45 exhausted searches for omitted dependency defs. Full-source retry launched.
+- Runtime failed-import correction run_6b8f50ff64dc4a058fbc1b188ba457f0 independently passed: original import error preserved without missing attribute exception.
+- UI draft fix run_3e677ad80d984e71b25a69dea1e41dc6 hit output token cap. Compact run_7c4925ca21f844a7bcf4f24f274f0ee9 wrote then exhausted line-count edits leaving syntax error. Exact micro corrections run_bfcfcb2aec334256ac0433b0711d2792 and run_71cef8edd6dd4a9987ec3db5a382f839 reviewed. Independent host GJS DOM checks passed selection/visibility/default+override/editor-load/save/conflict/clone/regions/busy; source staged in isolation.
+- Config guide rewrite final facts/examples run_9ad78c474c094c06ae114ad49bbb320e reviewed and staged. No root product integration yet.
+- Authoring-only profile run_8e71d8b0f4da44df88a330f908d9a004 created six file tools (no model commands/helper execution) in .browser-build/authoring. User default coder tools unchanged; host supervisor executes checks. Test draft run_7beec74b49fe43ca9e6f45eb7e0b1143 still exhausted missing digest/canonical definition searches; full source supplied for retry.
+
+- User requested coder output reserve increase: actual MCP author run_187ee019caa74e8bbd81353357521455 (qwen3.8:27b, trace root ~/.local/share/local-agent-browser-reserve) changed only output_reserve_tokens 8192→16384 in main and isolated authoring coder profiles. Integrated exact authored scalars; independent load and generated Ollama request verified num_predict16384/num_ctx65536. Other settings unchanged.
+- Job artifact retention/null-image correction run_93dde277647540bd8410704e9f6205f2 and server routing/assets/info run_a0c51107e9f845458fda0a9e9f7ac7ef completed_unverified and reviewed into isolation. Legacy chat regression 21 passed/3 Docker checks skipped without image. Full server metadata/ask wiring still pending.
+
+- Page draft run_08a074296eca4b98af64c14101ec4ec6 exhausted after meaningful edits; correction run_ca68f457658e4c9ebf02e1692ef52856 reviewed/staged. Independent GJS page startup/model default/profile submit checks and config component DOM checks passed.
+- Request tests run_a07cbe16f0b54c45b9e8a19bd94d7bba corrected import via run_25e70b4372c34afd8a3ef52af558c7b2; 42 tests passed independently and Ruff passed. Main existing mobile native checks24 passed with pinned Docker image.
+- Actual local Browser CLI smoke run_332512c92ba6460d8896292f61aa595e (qwen3.8:27b; ~/.local/share/local-agent-browser-smoke) completed_unverified with audit.ok and expected answer.
+- Broad profile-test run_69df9a2eb2de48c3b0d4eec029569c06 exhausted unrelated source discovery without authoring tests. Server finishing run_f246202f421d4a9ca7f4b527d5b5c8c6 similarly only read unrelated dependencies; cancelled via actual CLI, no edits accepted. Assigned narrower literal methods/tests to qwen3:30b-a3b-instruct-2507-q8_0 via actual MCP for comparison; no direct Codex implementation.
+
+- Coder comparison: run_24ce9c0a7abf4442a366ab3b564f66e2 failed repeated nonexistent project/Path reads. Runtime test draft run_f0939b646a804b58a7c0e3d5282d5b37 rejected invented APIs/missing import (not integrated). Qwen3 metadata run_5dbc72638b1b41ff80556e87fd7817a0 repeatedly read truncated file; cancelled without edits. Qwen3.8 CAS test run_f005f2d052ab4552aac4ec00f9fad0d1 corrected invalid stale stimulus via run_adef495d838440c3a313d903b251d38b; independently1 passed/Ruff passed.
+- README/browser generic model-label run_71dfdc0ff0dd4dca80b579ff2f38ba1f reviewed/staged. Combined docs run_20360734b7934ef6b9a9daf9ba281f06 exhausted discovery. Guide run_8ff58522a6cd4777b9086f6913face3e cancelled after supervisor omitted docs directory in snapshot; fixed snapshot and resubmitted.
+- Isolated authoring max_model_turns60 change authored run_a6f534728b1347b399ff6fce7007f55d (qwen3.8:27b, browser-smoke root); exact scalar-only delta reviewed/applied only .browser-build/authoring/config/coder.yaml. Main coder remains30turns. This allows inspected dependencies plus authored edits before budget exhaustion; does not claim implementation or verification of remaining tasks.
+- Runtime rewrite run_e4935c31914647b6bd42a4de3e9ccfff exhausted source exploration without edits. Narrow native BrowserAgent/view_image test assigned using existing native screenshot test as unchanged source reference and exact contracts.
+
+- Final metadata method run_9f43e34ab72f4eaf904f61f7a3e1c9f9 reviewed/staged. Independent authenticated HTTP matrix all6 agentprofiles passed exact model/tools/mode/frozen config/saved metadata/artifact preservation; sandbox separately editable. API editor create/update/conflict/invalid checks passed. Earlier context-finish run_cd52dabd29c345a395b43692fc8f0161 and HTTPtest run_3e95181f365a422e9e2e4a6d40db10eb exhausted30turn source exploration; latter retried with60-turn authoring profile.
+- API branch run_d1c5bf18bb2a4cccbeda3ff1fbf779e4 rejected incorrect jobid and missing429handling; corrected run_9528fd7520dd4313a050c3a173328e24. Integrated exact authored diff into isolated assembled/staging preserving separate authored metadata changes; independent standalone browser API400/actualjobid/completion/429 tests passed. Ruff fullsource/tests passed at this checkpoint.
+- Guide facts run_499ba05d1ca94f6bb5cc311487607e14 reviewed: aliasdefaults, discovery, control/blobs, coder16384. Legacy links run_e9c49946178645608ab64bfa69e079f6 misplaced MCP heading; placement run_9abcf25038da4289b1dcec0ae4994d37 and tool-name wording run_1932c7cf4b724846b762f312653ce97d reviewed/staged.
+- Independent netlist compatibility reproduction: BrowserServer(browser.yaml) froze browser-v1 cfg for legacy screenshot controller, incompatible with required phone-v1/tools(). Targeted normalization+tests assigned to local harness; fix not yet verified.
+
+- Native test run_37dff291f40244e8879afd06f7402f54 and HTTP test run_57f8902e19a44723858decd6e1bfec19 exhausted1200s reading dependencies despite60turns; no test edits accepted. Private authoring instructions authored via actual MCP run_ba023fd24a7a452d867d37f688835d4d (qwen3.8:27b), exact two-file diff reviewed/installed only .browser-build/authoring. Existing product instructions unchanged; supervisor checks remain independent. Local summary claimed verified, but run status is completed_unverified and no tests were run by this agent.
+- Independent assembled checkpoint: full pinned-Docker pytest243passed (63.78s), Ruff fullsource/tests passed, GJS config controls/page startup/default-model/submission checks passed, all6-profile authenticated HTTP matrix/editor checks passed. New native/HTTP regression authors and netlist compatibility fix are still running; root feature integration remains pending.
+- Independent native BrowserAgent/view_image acceptance passed using real pinned Docker and ScriptedProvider: uploaded bytes copied to scratch/browser-upload.png, actual tool schema/diagnostic preserved, helper image delivered on second model request, durable raw evidence reachable and audit.ok. This supervisor probe is independent validation, not an agent-authored permanent test.
+- Registered5 existing Browser author/runtime trace roots through current trace viewer source-catalog API at127.0.0.1:8766; existing3 sources retained. Verified output-reserve author run_187ee019caa74e8bbd81353357521455 appears in viewer catalog. Viewer needs no access token; browser pairing remains separate.
+- Scoped prompt retry native run_5dd4e7306c624f05ada7fabf0b90da7b cancelled24turns, netlist run_55c3fcdf5ea342c98ae4a66c6f57f8eb and HTTP run_dd9e38c7457b42a4a582bf5a560f62f1 cancelled after continued dependency discovery; no edits accepted. Concrete follow-ups use deliberately minimal relevant-source snapshots with exact contracts; netlist implementation separated from tests.
+- Final Browser wording authored run_9bd52a3811da4b2c80204da65410ceda; one exact reader error string change reviewed/staged, GJS page check passed. Native regression authored run_40483d00543d4bc6879ae16117ff9f2a, corrected payload/diagnostic/import assumptions run_fef031fa27594fed8007580310bc0b04, final import+actual helper-delivery assertion run_38deb7d64b3d4ee0bda7cf01a878996a. Initial native draft test failed TypeError and Ruff; no failed draft will enter root.
+- Netlist normalization authored run_423a1a8b534a4109ac03e3f0721f20d5, exact3-hunk diff reviewed/staged, independent browser/coder compatibility probes passed normalized instructions/hash/tools and preserved model/budgets/limits. Regression authored run_282ff84718f8401cb830e2038dc36852. HTTP regression authored run_cdab60738b8f4a0086ece1e5e398b95f; review/pytest rejected dict iteration, fictional Profiles.get/job.config/request.profile_name; correction authored run_bafd902abe884cac99757ffccb93b85a. All these actual MCP authors used local qwen3.8:27b; completed_unverified remains distinct from supervisor validation.
+- Independent final targeted pinned-Docker regression/legacy web checks8passed, full Ruff source/tests clean; root integration copied31 exact reviewed staged agent-authored artifacts with SHA256 manifest and unchanged-root baseline checks. Private authoring-v1 instruction version/runtime and60turn profile were NOT integrated into product. Root preserves original user changes; no commit/reset performed. Full integrated verification follows.
+- Integrated root verification: full pinned-Docker pytest247passed (60.72s), Ruff source/tests clean, GJS page/config controls passed, launcher syntax/help and gitdiff whitespace checks passed; hashes match31 reviewed artifacts. Doc billing wording run_d2d04ceaf95d4720a46488b544adfd09 rejected because it incorrectly said reviewing a model never incurs billing; literal clarification assigned to local author (no draft copied into root).
+- Final docs correction authored run_fb69830b1c3a49a2b72ab59dc71c6d11 (qwen3.8:27b), exact text diff reviewed/integrated: config selection/editing does not invoke inference; paid remote answer/review requests may charge; openai-local uses local endpoint. Documentation-only follow-up, no extra test rerun needed. Browser feature integration complete with247tests passed/Ruff+GJS clean. Existing running browser caches old assets and must be restarted with ./browser to use new UI; running trace viewer8766 retained and current build roots registered.
+
+- Operational browser restart: ./browser failed with another coding run owns this data root because idle legacy phone-web PID1359654 held ~/.local/share/local-agent/phone/locks/active-run.lock. Confirmed no queued/running browser jobs; SIGINT shut down old server gracefully. Started ./browser --host192.168.0.40 at existing LAN address/port8767 using existing saved state and new browser.yaml default. Verified live asset200/auth401/pairing200/browser info and7valid configs (6agent+sandbox). No implementation/config changes or model invocations for this operational recovery; trace viewer8766 untouched. Pairing code deliberately omitted from progress evidence.
+
+## Two-profile/config-editor cleanup (2026-10-09)
+
+- User approved consolidation to coder/analog, browser config editing fixes, and necessary MCP compatibility updates. Codex inspected root dirty state and copied current source into `.config-cleanup/source`; baseline SHA256 manifest in `.config-cleanup/review/baseline.json` preserves existing user work.
+- Actual `harness_run_code` invokes `local-agent run` subprocess. Local qwen3.8:27b authors: UI run_014ad8547db244ac8f2b19fdc4f21024, analog run_1aa249861138459eb513fd6fe6a3507d, MCP run_6b00e6d39ab740f9b3bd955806af47a8, defaults run_d4a165613b9d49abb04a2223a6c8642c. Per-task trace roots `~/.local/share/local-agent-config-cleanup-{ui,analog,mcp,defaults}`. Task briefs/results under `.config-cleanup/review`. Existing private authoring harness used for file-only tasks; product coder config used for defaults task requiring filesystem moves. No paid APIs invoked.
+- Initial UI invocation used relative repo path and MCP rejected it before an author run; corrected to absolute paths. Agent completion remains unverified until diff review and independent checks. No product changes integrated at this checkpoint.
+
+- Review/retry findings: initial analog and MCP tasks performed unrelated dependency searches and were cancelled before accepted source changes. qwen3-coder:30b MCP run_78623f5f7f31446aa17f88d8d012c64e authored three files but missed screenshot profile mapping; run_2ff0fd5d5171438e9e20ca9c58ef918d corrected the mapping but failed requested whitespace/docstring cleanup. These changes remain isolated and are not working end-to-end yet.
+- qwen3-coder:30b routing run_5045d9f3ba1e4c97aa5ee92906fbb2fd completed_unverified, but review found PDF mode still analog_image, analog workspace ignored, all v3 screenshots rejected by thread resolver, and stray PDF fields accepted. Concrete follow-up briefs written; this completion is NOT verified behavior.
+- First test author run_e0d83ef364c24c1fa7d57b3e7f0dcc7c rejected for nonexistent modules, duplicate functions, placeholder pass assertions, and wrong paths. Later test drafts also invented runtime APIs/omitted tool registration and are not accepted. UI run_d9273e647d854b358cf63bfb9cbf3f48 failed at output cap16384; draft retained, no root integration.
+- Analog instruction retries hit patch exact-match and stale-hash failures; an incorrect import would shadow global TOOL_INSTRUCTIONS. GLM follow-up run_432c2b82dc0f4a6e94cce84d79b1782b similarly failed repeated patch matching. Root defaults retry failed capability probe (coder prompt mandates list_files but probe exposes only read_file); role-neutral probe correction assigned, no checks weakened.
+- Concurrent local inference requests queued and delayed progress; supervisor cancelled unfinished jobs and switched to serialized, minimal correction tasks. All drafts/traces under per-task local-agent-config-cleanup roots and `.config-cleanup/review` are retained. Current product root remains unchanged by this cleanup; only governance progress notes written.
+
+- Final supervision checkpoint before authorship clarification: retained43 actual runs including capability probes; no run is still running. `.config-cleanup/review/runs.json` lists IDs/status/data roots; findings.md records exact acceptance requirements and rejected drafts. SHA256 comparison confirms ALL root product files match the pre-task dirty snapshot. No failed drafts integrated. Only isolated static checks passed; end-to-end intended behavior is NOT implemented/verified.
+- Serialized GLM saved-image author run_6f8693bf92634b7bb3e0ac98f196b763 completed_unverified but v3 PDF conditional was unreachable under legacy-only set. Follow-up run_a4f273b1b4db4e00abf01bb674bb9ff1 reversed image-present check; independent saved-image/PDF isolation assertions failed. No further model jobs remain. Supervisor requested explicit user authorship decision under AGENTS.md direct-coding exception; dependent implementation awaits that answer.
+
+## Model reliability history proposal (2026-10-09)
+
+- User asked whether tasks were decomposed, all installed models were tried, and consistent model outcomes recorded; proposed making outcome history a harness feature. Tasks were split into UI, instructions, routing, MCP, defaults/docs/tests, then smaller single-file corrections. Three of five installed models tried for this cleanup: qwen3.8:27b, qwen3-coder:30b, glm-4.7-flash:q8_0. qwen3:30b-a3b-instruct-2507-q8_0 and qwen3-vl:32b-instruct-q4_K_M were not tried in this cleanup.
+- Extracted durable manifests into `.config-cleanup/review/model-run-inventory.json`, separating author runs from capability probes. Author statuses: qwen3.8 seven supervisor cancellations; qwen3-coder four completed_unverified/four cancelled/one budget_exhausted/one failed; GLM two completed_unverified/one budget_exhausted. These are runtime outcomes, not correctness scores. No complete cleanup implementation passed independent verification. Partial MCP changes were useful but unfinished.
+- No controlled evidence supports a consistency ranking: different tasks/settings/inference contention, supervisory cancellation, contradictory probe instructions, patch failures and incorrect tests are confounders. Prior qwen3.8 browser work did produce independently checked integrated changes; that does not establish a comparable reliability rate for this task.
+- Existing evaluation.suite/report already derive timing, tool failures, retries and fixture verification from durable evidence. Proposed extension: durable supervisor review outcomes per run/artifact, task-family summaries by exact model identity/settings, verified/partial/rejected/unreviewed/cancelled distinctions, evidence links, sample counts, and explicit conditions. Automatic recording on runs; correctness only recorded after checks/review. No automatic model routing until sufficient comparable evidence.
+
+## Config consolidation paused at user request (2026-10-09)
+
+- User requested stopping jobs. Supervisor terminated the active request-routing harness CLI and its MCP orchestration processes; independent process and Docker checks found no remaining harness run processes or containers. No further jobs will be launched while paused.
+- New isolated attempt uses qwen3-vl:32b-instruct-q4_K_M. Probe run_236385ded9a8463d97a3cc91c05696ea passed. Analog-profile author run_5c03d417984f4492b6cffd564c675790 produced reviewed changes in `.config-consolidation/assembled` only; config loading, shared helper instructions, and Ruff checks passed. No root product changes integrated.
+- Browser-routing run_ff0d6a87a3c440f1bfe226ebebe5ad79 failed repeated exact-match patches and its partial draft rejected screenshots; rejected. PDF-instructions run_938bd406154244019f979824cdd6979e failed repeated missing-dependency searches; dependency added to a follow-up snapshot but no follow-up started. Request-routing follow-up was stopped by user; artifacts and traces retained under `.config-consolidation` and local-agent-config-consolidation data root. Overall consolidation remains incomplete and unverified.
+
+## 2026-10-26 — Docker lifecycle work (in progress)
+
+User requested host-controlled ephemeral/persistent Docker execution, workspace isolation, idle expiry, recovery, and correlated traces. Plan and task briefs: `.browser-build/lifecycle/review/`. Existing uncommitted files preserved in an isolated assembled snapshot; baseline SHA-256 inventory is `baseline.json`. No product changes integrated yet.
+
+Baseline independent check: `uv run --locked pytest -q` → 216 passed,31 skipped (Docker-dependent tests require explicit image option). Docker daemon available. Authoring uses actual MCP `harness_run_code` → `local-agent run`, private `authoring-v1` profile, Ollama `qwen3.8:27b`, no paid model.
+
+Contracts author run `run_31bf9247f2d1476c98e6d53ae3f94aff`, workspace `ws_c7d01a36b6b74812a30f51f8bd29f407`, data root `~/.local/share/local-agent-lifecycle-contracts`: completed_unverified, audit OK. Reviewer copied only contracts/events/test files to assembled snapshot. Ruff passed. Independent tests:45passed3failed because authored test helper omitted pre-existing required nullable duration_seconds field. A narrow correction task was sent to local author; no supervisor implementation fix. Manager and worker authoring runs remain in progress, with separate data roots local-agent-lifecycle-manager and local-agent-lifecycle-worker.
+
+Design constraints found during review: published per-command result precedes commit/release; keeper exit status is not command outcome; unknown mutations must never replay. Completed run events are immutable, so later cleanup requires a correlated maintenance audit run. Readonly/offline restrictions remain; workspace venvs are durable already, persistence does not permit global package installation. These changes do not by themselves establish improved task success rate.
+
+Lifecycle review update: contracts correction `run_f4c721db5d8f4cfbb6ddb51dd81b69a2` (qwen3.8) fixed test helper; independent settings suite48passed. Worker initial `run_8a16a678b6c743ddac1fd039afab4393` completed_unverified; review found7test failures (invalid test assumption, patching os.open instead of builtin open, readonly stdin.buffer mock). Reviewer also found regex trailing-newline acceptance. Comparison correction with local qwen3-coder:30b `run_f4a43b614090421ca7363544ac900275` exhausted identical-action budget; its partial duplicate constant was rejected. Follow-up to qwen3.8 contains exact locations and failures.
+
+Manager initial `run_9ba6d415657d43f5908f51925d69140a` completed_unverified but rejected for audit-failure swallowing, cleanup lock probe/release race, stale EXECUTING reuse, missing ownership/attestation in removal paths, and terminated manifest overwritten IDLE. Follow-up `manager-fix.md` covers corrections. During that run supervisor supplied an exact unchanged copy of existing storage/blobs.py as reference context; it is not an implementation artifact to integrate.
+
+Executor initial qwen3.8 run `run_57d3d31eaa1d4f2ea383234f758aa95d` was durably cancelled after alternating repeated searches for absent def append/def put without edits. Retry includes actual unchanged storage APIs. This is authoring failure evidence, not feature validation. Product changes still isolated in assembled snapshot.
+
+The user explicitly authorized Codex to implement the remaining changes after repeated local authoring failures: “Allow Codex to implement the remaining changes.” From this point, remaining implementation/tests/fixes may be Codex-authored. Earlier drafts and run traces are retained; no claim that local agents authored subsequent supervisor fixes. Review of acquire run run_0560656737e54989a8cdbf4570dfa7ce found it claimed ownership/config mismatch corrections that were absent from the file. Session run run_772729c3be3b4088a5c986245d7cae10 did supply useful exact methods; still pending behavioral verification. Real-Docker baseline before changes:247passed.
+
+## 2026-10-26 — Docker lifecycle implementation completed
+
+Implemented and integrated after the user's explicit direct-coding authorization.
+The final production implementation is **mixed authorship**: the local qwen3.8
+contracts/events work and worker protocol draft were retained with supervisor
+extensions/fixes; the final lifecycle manager, reaper, executor/runtime/recovery
+integration, additional tests, and documentation were implemented by Codex.
+The rejected local manager and executor replacements were not shipped as working
+implementations. No paid models were used.
+
+Evidence and provenance:
+
+- Task briefs, rejected drafts, review utilities, and baseline hashes:
+  `.browser-build/lifecycle/review/`.
+- `authoring-runs.json` records 30 local run/probe IDs, models, statuses,
+  workspace IDs, and host data-root locations. These include unsuccessful,
+  cancelled, and unverified attempts; their statuses are not test results.
+- `integration-manifest.json` inventories 23 integrated files with original
+  baseline hashes and final SHA-256 hashes. Existing user modifications were
+  preserved; original destination hashes were checked before integration.
+- Actual authoring traces remain under
+  `~/.local/share/local-agent-lifecycle-*`, written by the host harness.
+
+Final behavior:
+
+- Ephemeral remains the compatibility default; every tool-enabled profile can
+  opt into persistent execution through the new `execution` configuration.
+- Persistent containers are workspace-owned, locked across processes, capacity
+  limited, security-attested, and reused through `docker exec`. Environment/cwd
+  are explicit per command; workspace files survive removal.
+- Default idle expiry is 1800 seconds. A detached host reaper performs cleanup,
+  records maintenance in the existing audit store, skips active workspaces,
+  and avoids creating empty polling runs. Owned orphans and deleted workspaces
+  can be cleaned safely.
+- Per-command mappings/results preserve identity, timestamps, durations,
+  command argv, separate output blobs, and error status. Maintenance events
+  retain originating run/execution/tool-call/trace correlation.
+- Persistent recovery never treats keeper logs/exit status as command success.
+  Missing published results require reconciliation; uncertain mutations are not
+  replayed. Recovery cannot stop a keeper used by a later execution.
+- CLI operations: `local-agent containers list`, `cleanup`, and
+  `stop --workspace ws_<id>` (global `--data-root` precedes `containers`).
+- Current policy remains offline/nonroot/read-only with existing security
+  ceilings. CPU/RAM settings are bounded; enabled network is rejected.
+  Trusted bootstrap/verification/diff tasks remain ephemeral.
+
+Validation on final working-tree code:
+
+- `/home/ruthvik/.local/bin/uv run --locked pytest -q --docker-image sha256:d57539bd8f15561112b981b48fc362ae673dea03ba4f759728c45ae0be6a31da`
+  → **351 passed in 108.72 seconds**, including real Docker and process-crash tests.
+- `/home/ruthvik/.local/bin/uv run --locked ruff check src/local_agent tests`
+  → **All checks passed**.
+- CLI `containers --help`, empty-root `list`, and empty-root `cleanup` exercised.
+- Earlier baseline 247 tests and intermediate 348/350 test suites also passed.
+  A final deleted-workspace cleanup regression was discovered while removing
+  validation containers, fixed, and included in the 351-test result.
+- Test-created keepers from earlier recovery checks were removed through the
+  verified ownership cleanup path; no unrelated containers were selected.
+
+The trusted worker image was rebuilt and `config/sandbox.json` now pins
+`sha256:d57539bd8f15561112b981b48fc362ae673dea03ba4f759728c45ae0be6a31da`.
+Usage, all seven settings, trace paths, architecture, and limitations are in
+`docs/executor.md`; README, guide, configuration reference, and MCP docs link it.
+Persistent coding is opt-in, not yet the default. This work establishes execution
+behavior and traceability; it does not claim improved LLM task success rate.
+
+## 2026-10-26 — Executor package review and developer README
+
+Reviewed all executor modules (including toolkit), related contracts/runtime,
+Docker packaging, tests, and lifecycle documentation. Preserved pre-existing
+working-tree modifications using `.executor-review/source` and SHA-256 baselines.
+No behavioral fixes were applied in this pass. Findings and reproduction details
+are in `.executor-review/findings.md`:
+
+- Custom-tool mutations are reported as `side_effect_status=none`; a real Docker
+  probe successfully wrote a project file and confirmed the incorrect metadata.
+- Helper-manifest commands leave `/tmp/helper-*.py` behind in persistent keepers;
+  a real Docker probe confirmed the leftover after successful execution.
+- Schema validation counts ASCII-escaped JSON while execution counts UTF-8 JSON;
+  a 30,013-byte Unicode execution payload is rejected as 90,013 bytes.
+- Legacy `base.Executor`/`MockExecutor` dictionary interface differs from the
+  live `ExecutionResult` backend; replay has its own recorded-result reader.
+- The obsolete M0-only package description was corrected in this pass.
+
+Local-agent authorship and review evidence:
+
+- Initial authoring: `run_c1ae6047ccad425d965818a2460ec81e`, local
+  `qwen3:30b-a3b-instruct-2507-q8_0`, completed_unverified. Rejected as a finished
+  result: invented commands, incorrect environment/replay/lifecycle claims,
+  duplicate protocol in __init__, missing lifecycle link.
+- Correction: `run_96a4add4670a4d91ae9c0f344cfbeb4b`, same model,
+  budget_exhausted (`three identical failed actions`, patch conflicts). Retained
+  drafts as input, not proof of completed work.
+- `qwen3-coder:30b` retry failed its capability gate; probe
+  `run_4bc333faec644580940d7f37d2f4def8`. No authoring run or integrated changes
+  attributed to that model.
+- Final authoring: `run_4e27881496d54abe99e55c3fc561b754`, local `qwen3.8:27b`,
+  completed_unverified, audit ok (151 events, 154 checked blobs). Independently
+  reviewed and integrated its exact three files: `docs/executor/README.md`,
+  lifecycle-guide link in `docs/executor.md`, and docstring-only update to
+  `src/local_agent/executor/__init__.py`. The final run corrected earlier drafts;
+  the README and docstring have local-agent draft/correction provenance.
+- Task briefs, task-specific configs, CLI results, baseline and integration
+  manifests remain in `.executor-review/`. Authoring traces and generated
+  workspaces remain under `~/.local/share/local-agent-executor-review*`.
+- Codex authored the review findings and this progress record, not the shipped
+  implementation or README. All runs used actual `uv run --locked local-agent
+  run`; no paid models were invoked. Initial probe IDs are in CLI result files.
+
+Independent validation:
+
+- Full current-tree suite with pinned real Docker image
+  `sha256:d57539bd8f15561112b981b48fc362ae673dea03ba4f759728c45ae0be6a31da`:
+  **351 passed in 95.99s**, including crash recovery.
+- Focused worker/options/lifecycle/settings/custom-tool/image tests: **131 passed**.
+- `uv run --locked ruff check src/local_agent tests`: passed.
+- After documentation integration: executor lint, compileall, Markdown target
+  existence, docstring-only AST, destination baseline hashes and scoped
+  `git diff --check`: all passed. No behavior changed after the full test run.
+- Review probes stopped their owned persistent keeper and removed their temporary
+  workspace. The behavioral findings are coverage gaps despite the passing suite;
+  a completed authoring run is not itself evidence of correct behavior.
+
+## 2026-10-26 — Executor inconsistencies fixed after direct-authoring authorization
+
+The user explicitly authorized Codex to author these executor changes directly:
+“you go ahead and author these changes.. don't have to use locals”. The final
+implementation, new regression tests, README amendments, and verification were
+completed by Codex. Earlier local drafts informed the shared-serializer design;
+none is being reported as a successful, verified local-agent implementation.
+Existing unrelated working-tree changes were preserved. The eight pre-existing
+files changed by this task match the saved task baseline apart from these fixes;
+new regression tests are in two separate files.
+
+Changes:
+
+- `DockerExecutor` reports arbitrary `run_command`/`execute_tool` side effects as
+  unknown even on failure. Successful writes, patches, registrations and PDF
+  renders report applied; unsuccessful typed mutations conservatively report
+  unknown. Read-only operations retain none.
+- Trusted helper-manifest execution captures code inside a private temporary
+  directory managed by `ExitStack`. Cleanup covers success, nonzero exits,
+  subprocess exceptions, header publication failure, and snapshot creation/write
+  failure. Exact-byte hashes and immutable helper evidence remain intact.
+- A shared stdlib-only UTF-8 JSON serializer enforces 65,536 bytes for host
+  argument schemas, worker validation, and subprocess stdin. This additionally
+  fixes the host's premature ASCII-escaped-size rejection, discovered by the
+  new real-Docker regressions. Non-finite values remain rejected. Registration
+  parameter sizes use the same byte policy.
+- Added `LiveExecutor` with typed dispatch/options/result and release methods;
+  retained legacy `Executor` and scripted MockExecutor unchanged in behavior.
+  Docker method annotations match the live capability. Backend-specific recovery
+  APIs and synchronous recorded replay remain separate.
+- Updated `docs/executor/README.md` with interfaces, mutation semantics, cleanup,
+  UTF-8 limits, and regression-test command.
+- Rebuilt the sandbox using `uv run --locked local-agent build-sandbox`;
+  `config/sandbox.json` pins
+  `sha256:a4eb1c5633b5e83bbef63da7d23fd3543a0143381809f3314621bdfc1f29ed63`
+  and updated worker/toolkit fingerprints. Dockerfile/base/dependencies unchanged.
+
+Authoring attempt evidence retained in `.executor-fixes/`:
+
+- Broad local `qwen3.8:27b` run `run_ac8868ca3e20436d947e7954d742a2b1`:
+  budget_exhausted (model turns), no changes. Capability probe
+  `run_63583930654f40e2982eb37725d0892b` passed.
+- Narrow Unicode run `run_d38a3aa7680b440dbf69d9f86bd7f84f`, same local model:
+  budget_exhausted. Production draft was useful, but tests had a syntax error
+  and incorrect byte-boundary arithmetic; host verification rejected the draft.
+  Capability probe `run_d8cb3a4c5bcb49929dd5609c2720c4ab` passed.
+- Helper run `run_274b9faf943a4a27b08f89cae7a6dea8`, same model, was durably
+  cancelled after direct-authoring authorization. Its isolated worker/test draft
+  was not integrated. Capability probe `run_5070b1677d8948468396c6887752310e` passed.
+- Task briefs, baselines, run results, build result and final hashes are retained.
+  Actual traces/workspaces remain under `~/.local/share/local-agent-executor-fixes*`.
+  No paid models were invoked. No local coding runs remain active for this task.
+
+Validation:
+
+- New regressions: **14 passed in 9.04s** against the rebuilt pinned image.
+  These include actual custom-tool mutation followed by success/nonzero exit in
+  both modes, host/worker/subprocess Unicode payload consistency at the exact
+  limit and one byte over, PDF output mutation metadata, helper exception
+  cleanup, and repeated persistent helper execution without leaked snapshots.
+- Full suite: `uv run --locked pytest -q --docker-image
+  sha256:a4eb1c5633b5e83bbef63da7d23fd3543a0143381809f3314621bdfc1f29ed63 --tb=short`
+  → **365 passed in 116.21s**, including real Docker and crash recovery.
+- `uv run --locked ruff check src/local_agent tests` → all checks passed.
+- Pinned image existence/nonroot configuration, source fingerprints,
+  typed return annotations, README links, and scoped whitespace checks passed.
+- Gotchas: use the image ID returned by Docker inspection / sandbox.json, not
+  the build-export config digest. PDF previews combine stdout and stderr;
+  regression assertions parse structured results from the separate stdout blob.
+- All four behavioral/interface findings from the executor review are now
+  addressed. The review's stale package description was fixed in the earlier
+  documentation pass. Passing tests validate these behaviors, not model coding
+  success rates.

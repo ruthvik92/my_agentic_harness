@@ -1,4 +1,4 @@
-"""Reviewed LAN HTTP routes for the harness-authored mobile interface."""
+"""Reviewed LAN HTTP routes for the harness-authored browser interface."""
 
 import base64
 import ipaddress
@@ -13,24 +13,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from local_agent.config import load_config
+from local_agent.config import instruction_text, load_config
 from local_agent.mobile import validate_request
 from local_agent.mobile.activity import record
 from local_agent.mobile.feedback import answer_feedback
 from local_agent.mobile.jobs import Jobs, publish
 from local_agent.mobile.markdown import display_thread
 from local_agent.mobile.models import Models
+from local_agent.mobile.profile_turns import submit_profile_turn
+from local_agent.mobile.profiles import Profiles
 from local_agent.mobile.recovery import recover_review
 from local_agent.mobile.threads import Threads
 from local_agent.mobile.tokens import DEFAULT_BASELINE, job_usage, summary
+from local_agent.storage.blobs import digest
 from local_agent.storage.database import Store
 
 
-class PhoneServer(ThreadingHTTPServer):
+class BrowserServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(
-        self, root, agent_path, host="127.0.0.1", port=8767, runner=None, verifier_path=None
+        self, root, agent_path, host="127.0.0.1", port=8767, runner=None, verifier_path=None,
+        config_dir=None, allowed_roots=None,
     ):
         address = ipaddress.IPv4Address(host)
         networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8")
@@ -41,25 +45,40 @@ class PhoneServer(ThreadingHTTPServer):
         if not 0 <= port <= 65535:
             raise ValueError("invalid port")
         config = load_config(Path(agent_path))
-        if config.instructions_version != "phone-v1" or config.tools:
-            raise ValueError(
-                "phone-web requires phone-v1 instructions and an empty model tool list"
-            )
         self.root, self.config = Path(root), config
         static = Path(__file__).with_name("static")
         self.asset_paths = {
             "/": static / "index.html",
             "/thread-controls.js": static / "thread-controls.js",
+            "/config-controls.js": static / "config-controls.js",
         }
         # Match the browser assets to this loaded server; edits require a restart.
         self.assets = {route: path.read_bytes() for route, path in self.asset_paths.items()}
         self.models = Models(config, verifier_path)
+        self.profiles = Profiles(
+            Path(config_dir) if config_dir is not None else Path(agent_path).resolve().parent
+        )
+        self.default_profile = Path(agent_path).name
+        if Path(agent_path).resolve().parent != self.profiles.directory:
+            raise ValueError(
+                "agent_path must live directly inside the profiles directory"
+            )
+        self.profiles.load(self.default_profile)
+        roots = allowed_roots if allowed_roots is not None else [Path.cwd()]
+        if not roots:
+            raise ValueError("allowed_roots must not be empty")
+        self.allowed_roots = tuple(Path(root).resolve() for root in roots)
+        if not self.allowed_roots or not all(root.is_dir() for root in self.allowed_roots):
+            raise ValueError("allowed_roots must be nonempty and every root must be a directory")
         self.pairing_code = secrets.token_urlsafe(16)
         self.sessions = {}
         self.session_lock = threading.Lock()
-        super().__init__((str(address), port), PhoneHandler)
+        super().__init__((str(address), port), BrowserHandler)
         try:
-            self.jobs = Jobs(self.root, agent_path, config, runner=runner, on_result=self.finish)
+            self.jobs = Jobs(
+                self.root, agent_path, config, runner=runner, on_result=self.finish,
+                allowed_roots=self.allowed_roots,
+            )
             self.threads = Threads(self.root)
             self.migrate()
         except BaseException:
@@ -164,26 +183,39 @@ class PhoneServer(ThreadingHTTPServer):
                     job.get("kind", "answer"),
                 )
                 thread = self.threads.get(thread_id)
+                frozen_fields = {}
+                for field in (
+                    "profile_name",
+                    "config_hash",
+                    "mode",
+                    "tools",
+                    "instructions_version",
+                ):
+                    if field in job:
+                        frozen_fields[field] = job[field]
                 for m in thread["messages"]:
                     if m.get("job_id") == job["job_id"]:
                         m.update(
                             provider=job.get("provider"), has_image=job.get("has_image", False)
                         )
+                        m.update(frozen_fields)
                 if trace:
+                    event_data = {
+                        "job_id": job["job_id"],
+                        "source_run_id": job.get("run_id"),
+                        "model": job["model"],
+                        "provider": job.get("provider"),
+                        "kind": job.get("kind", "answer"),
+                        "memory_messages": job.get("memory_messages", 0),
+                        "source_run_ids": job.get("source_run_ids", []),
+                        "token_usage": job.get("token_usage"),
+                    }
+                    event_data.update(frozen_fields)
                     activity = record(
                         self.root,
                         thread_id,
                         "phone.turn_linked",
-                        {
-                            "job_id": job["job_id"],
-                            "source_run_id": job.get("run_id"),
-                            "model": job["model"],
-                            "provider": job.get("provider"),
-                            "kind": job.get("kind", "answer"),
-                            "memory_messages": job.get("memory_messages", 0),
-                            "source_run_ids": job.get("source_run_ids", []),
-                            "token_usage": job.get("token_usage"),
-                        },
+                        event_data,
                     )
                     thread.setdefault("activity_runs", []).append(activity)
                     if job.get("token_usage"):
@@ -200,6 +232,12 @@ class PhoneServer(ThreadingHTTPServer):
                 self.threads.update(thread_id, pending_job=None)
 
     def submit_thread(self, thread_id, payload, kind="answer"):
+        if kind == "answer" and (
+            isinstance(payload, dict)
+            and "profile_name" in payload
+            or self.config.instructions_version != "phone-v1"
+        ):
+            return submit_profile_turn(self, thread_id, payload)
         allowed = {"question", "image", "model_id"} if kind == "answer" else {"model_id"}
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise ValueError("Unexpected thread request fields")
@@ -239,6 +277,13 @@ class PhoneServer(ThreadingHTTPServer):
                     )
                 image = None
                 cfg, _ = self.models.select(payload.get("model_id"), has_image=False)
+                cfg = cfg.model_copy(
+                    update={
+                        "instructions_version": "phone-v1",
+                        "tools": (),
+                        "instructions_hash": digest(instruction_text("phone-v1").encode()),
+                    }
+                )
                 question = (
                     "Using only the schematic observations and conversation supplied, infer a partial "
                     "SPICE netlist in a code block. Identify the evidence for each component and connection. "
@@ -316,7 +361,7 @@ class PhoneServer(ThreadingHTTPServer):
             return True
 
 
-class PhoneHandler(BaseHTTPRequestHandler):
+class BrowserHandler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(15)
@@ -383,7 +428,7 @@ class PhoneHandler(BaseHTTPRequestHandler):
         if not self.boundary():
             return
         path = urlparse(self.path).path
-        if path == "/thread-controls.js":
+        if path in ("/thread-controls.js", "/config-controls.js"):
             script = self.server.assets[path]
             self.respond(200, script, mime="application/javascript")
             return
@@ -407,10 +452,20 @@ class PhoneHandler(BaseHTTPRequestHandler):
                         "auth": "pairing-code",
                         "owner": "local-owner",
                         "restart_required": self.server.restart_required(),
+                        "interface": "browser",
+                        "default_profile": self.server.default_profile,
+                        "allowed_roots": [str(root) for root in self.server.allowed_roots],
+                        "config_dir": str(self.server.profiles.directory),
+                        "tools": list(self.server.config.tools),
+                        "instructions_version": self.server.config.instructions_version,
                     },
                 )
             elif path == "/api/models":
                 self.respond(200, self.server.models.catalog())
+            elif path == "/api/configs":
+                self.respond(200, self.server.profiles.catalog())
+            elif match := re.fullmatch(r"/api/configs/([^/]+)", path):
+                self.respond(200, self.server.profiles.read(match[1]))
             elif path == "/api/threads":
                 self.respond(200, self.server.threads.recent())
             elif path == "/api/usage":
@@ -504,6 +559,19 @@ class PhoneHandler(BaseHTTPRequestHandler):
                     cookie=f"phone_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400",
                 )
             elif path == "/api/ask":
+                if not isinstance(request, dict):
+                    raise ValueError("request must be an object")
+                if "profile_name" in request or self.server.config.instructions_version != "phone-v1":
+                    thread_id = self.server.threads.create(
+                        str(request.get("question") or "New chat")[:160]
+                    )
+                    try:
+                        job_id = self.server.submit_thread(thread_id, request)
+                    except RuntimeError as exc:
+                        self.error(429, str(exc))
+                        return
+                    self.respond(202, {"job_id": job_id, "thread_id": thread_id})
+                    return
                 request = validate_request(request)
                 try:
                     job_id = self.server.jobs.submit(request)
@@ -515,6 +583,37 @@ class PhoneHandler(BaseHTTPRequestHandler):
                 if request != {}:
                     raise ValueError("Model refresh takes no fields")
                 self.respond(200, self.server.models.catalog(refresh=True))
+            elif path == "/api/configs/validate":
+                if (
+                    not isinstance(request, dict)
+                    or set(request) != {"name", "content"}
+                    or not isinstance(request["name"], str)
+                    or not isinstance(request["content"], str)
+                ):
+                    raise ValueError("Config validation requires name and content")
+                self.respond(200, self.server.profiles.validate(request["name"], request["content"]))
+            elif path == "/api/configs/save":
+                if (
+                    not isinstance(request, dict)
+                    or not {"name", "content"} <= set(request)
+                    or set(request) - {"name", "content", "expected_hash"}
+                    or not isinstance(request["name"], str)
+                    or not isinstance(request["content"], str)
+                    or ("expected_hash" in request
+                        and not isinstance(request["expected_hash"], str))
+                ):
+                    raise ValueError("Config save requires name and content")
+                try:
+                    self.respond(
+                        200,
+                        self.server.profiles.save(
+                            request["name"],
+                            request["content"],
+                            request.get("expected_hash"),
+                        ),
+                    )
+                except FileExistsError as exc:
+                    self.error(409, str(exc))
             elif path == "/api/threads":
                 if not isinstance(request, dict) or set(request) - {"title"}:
                     raise ValueError("Thread creation permits only title")
@@ -577,15 +676,23 @@ class PhoneHandler(BaseHTTPRequestHandler):
             self.error(400, str(exc))
 
 
-def serve(root, agent_path, host="127.0.0.1", port=8767, verifier_path=None):
-    with PhoneServer(root, agent_path, host, port, verifier_path=verifier_path) as server:
+PhoneServer = BrowserServer
+PhoneHandler = BrowserHandler
+
+
+def serve(root, agent_path, host="127.0.0.1", port=8767, verifier_path=None,
+          config_dir=None, allowed_roots=None):
+    with BrowserServer(
+        root, agent_path, host, port, verifier_path=verifier_path,
+        config_dir=config_dir, allowed_roots=allowed_roots,
+    ) as server:
         print(
-            f"Phone interface: http://{host}:{server.server_port}\nPairing code: {server.pairing_code}",
+            f"Browser interface: http://{host}:{server.server_port}\nPairing code: {server.pairing_code}",
             flush=True,
         )
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             print(
-                "Stopping phone interface; waiting for the active question to finish...", flush=True
+                "Stopping browser interface; waiting for the active question to finish...", flush=True
             )

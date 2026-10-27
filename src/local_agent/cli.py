@@ -27,11 +27,23 @@ def main(argv=None):
         "trace-web", help="serve read-only traces on loopback for your browser"
     )
     browser.add_argument("--port", type=int, default=8765)
-    phone = sub.add_parser("phone-web", help="serve paired screenshot chat on your home LAN")
-    phone.add_argument("--host", default="127.0.0.1")
-    phone.add_argument("--port", type=int, default=8767)
-    phone.add_argument("--agent", type=Path, default=Path("config/phone.yaml"))
-    phone.add_argument("--verifier-agent", type=Path, default=Path("config/phone-verifier.yaml"))
+    browser = sub.add_parser(
+        "browser-web",
+        aliases=["phone-web"],
+        help="serve the paired browser interface",
+    )
+    browser.add_argument("--host", default="127.0.0.1")
+    browser.add_argument("--port", type=int, default=8767)
+    browser.add_argument("--agent", type=Path, default=Path("config/browser.yaml"))
+    browser.add_argument("--verifier-agent", type=Path, default=Path("config/phone-verifier.yaml"))
+    browser.add_argument("--config-dir", type=Path, default=None)
+    browser.add_argument("--allow-root", type=Path, action="append", default=None)
+    browser_run = sub.add_parser(
+        "browser-run", help="run a paired browser request against a stored run"
+    )
+    browser_run.add_argument("--agent", type=Path, required=True)
+    browser_run.add_argument("--request", type=Path, required=True)
+    browser_run.add_argument("--allow-root", type=Path, action="append", default=None)
     screenshot = sub.add_parser(
         "screenshot", help="answer a screenshot question with retained traces"
     )
@@ -98,13 +110,25 @@ def main(argv=None):
             )
         if name == "replay":
             child.add_argument("--recorded-only", action="store_true", required=True)
+    containers = sub.add_parser("containers", help="inspect or clean host-owned persistent sessions")
+    containers.add_argument("action", choices=("list", "cleanup", "stop"))
+    containers.add_argument("--workspace")
+    containers.add_argument("--agent", type=Path, default=Path("config/coder.yaml"))
     args = parser.parse_args(argv)
     store = None
     try:
-        if args.command == "phone-web":
+        if args.command in {"browser-web", "phone-web"}:
             from local_agent.mobile.web import serve
 
-            serve(args.data_root, args.agent, args.host, args.port, args.verifier_agent)
+            serve(
+                args.data_root,
+                args.agent,
+                args.host,
+                args.port,
+                args.verifier_agent,
+                config_dir=args.config_dir,
+                allowed_roots=args.allow_root,
+            )
             return 0
         if args.command == "trace-web":
             from local_agent.observability.browser import serve
@@ -125,6 +149,36 @@ def main(argv=None):
             return 0
         readonly = args.command in {"trace", "audit", "replay", "report"}
         store = Store(args.data_root, readonly=readonly)
+        if args.command == "containers":
+            from local_agent.config import load_config
+            from local_agent.doctor import sandbox_config
+            from local_agent.executor.docker import DockerExecutor
+            from local_agent.executor.maintenance import sweep
+            from local_agent.workspace.manager import Workspaces
+
+            config = load_config(args.agent)
+            image = sandbox_config()["image"]
+            if args.action == "list":
+                manager = DockerExecutor(
+                    store, Workspaces(store.root), image, settings=config.execution
+                ).make_manager(lambda *_: None)
+                records = []
+                for path in sorted(manager.directory.glob("ws_*.json")):
+                    record = manager.load(path.stem)
+                    records.append({key: record.get(key) for key in (
+                        "workspace_id", "container_id", "state", "last_used_at",
+                        "idle_timeout", "active_execution_id",
+                    )})
+                print(json.dumps(records, indent=2))
+            else:
+                if args.action == "stop" and not args.workspace:
+                    raise ValueError("containers stop requires --workspace")
+                result = asyncio.run(sweep(
+                    store.root, image, config.execution,
+                    workspace_id=args.workspace if args.action == "stop" else None,
+                ))
+                print(json.dumps(result, indent=2))
+            return 0
         if args.command == "screenshot":
             from tempfile import TemporaryDirectory
 
@@ -153,6 +207,31 @@ def main(argv=None):
             ):
                 result["audit"] = audit(store, result["run_id"])
                 store.export_jsonl(result["run_id"])
+            print(json.dumps(result, indent=2))
+            return (
+                0
+                if result["status"] == "completed_unverified" and result.get("audit", {}).get("ok")
+                else 1
+            )
+        if args.command == "browser-run":
+            from local_agent.circuits.agent import read_evidence
+            from local_agent.config import load_config
+            from local_agent.doctor import sandbox_config
+            from local_agent.mobile.browser_requests import validate_browser_request
+            from local_agent.mobile.browser_runtime import run_browser
+
+            request_path = args.request.absolute()
+            request = json.loads(
+                read_evidence(request_path.parent, request_path.name, 6 * 1024 * 1024)
+            )
+            if not isinstance(request, dict):
+                raise ValueError("browser-run request must be a JSON object")
+            request.pop("mode", None)
+            config = load_config(args.agent)
+            normalized = validate_browser_request(
+                request, config, args.allow_root or [Path.cwd()]
+            )
+            result = asyncio.run(run_browser(store, config, normalized, sandbox_config()))
             print(json.dumps(result, indent=2))
             return (
                 0
@@ -231,7 +310,13 @@ def main(argv=None):
             resolved = store.blobs.json(manifest["config_ref"])
             config = AgentConfig.model_validate_json(canonical(resolved["agent"]))
             runtime = Agent
-            if config.instructions_version == "analog-v1":
+            if config.instructions_version == "browser-v1" or any(
+                event.event_type == "browser.prepared" for event in store.events(args.run_id)
+            ):
+                from local_agent.mobile.browser_agent import BrowserAgent
+
+                runtime = BrowserAgent
+            elif config.instructions_version in {"analog-v1", "analog-v2"}:
                 from local_agent.circuits.agent import CircuitAgent
 
                 runtime = CircuitAgent

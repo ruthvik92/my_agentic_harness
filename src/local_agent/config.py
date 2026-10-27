@@ -19,6 +19,17 @@ fixtures. Keep your response concise. After tests pass, stop calling tools and e
 """
 
 
+TOOL_INSTRUCTIONS = """Use the tools exposed to you for every action. When a needed helper is missing, create a Python
+tools/name.py that reads JSON from stdin and writes JSON to stdout, then register_tool with name,
+description, version, code_path and parameters, and call it with execute_tool using name and arguments.
+Run the local registry only. Primitive parameters use string, number, integer or boolean schema only,
+with additionalProperties false and a required list. Captured code is immutable; for a duplicate name
+use a fresh name. Commands run offline in Docker and the environment is unchanged.
+Respect explicit task scope and check limits: if the task requires compile only, stop after compile.
+Do not search outside the copied project for missing packages, and do not perform repeated unchanged writes.
+"""
+
+
 def load_config(path: Path) -> AgentConfig:
     value = yaml.safe_load(path.read_text())
     instructions = instruction_text(value.get("instructions_version", "coder-v1"))
@@ -44,10 +55,23 @@ def instruction_text(version):
         from local_agent.mobile.instructions import PHONE_INSTRUCTIONS
 
         return PHONE_INSTRUCTIONS
+    if version == "browser-v1":
+        from local_agent.mobile.instructions import BROWSER_INSTRUCTIONS
+
+        return BROWSER_INSTRUCTIONS
     if version == "analog-v1":
         from local_agent.circuits.instructions import CIRCUIT_INSTRUCTIONS
 
         return CIRCUIT_INSTRUCTIONS
+    if version == "analog-v2":
+        from local_agent.circuits.instructions import (
+            CIRCUIT_INSTRUCTIONS,
+            VISION_TOOL_INSTRUCTIONS,
+        )
+
+        return CIRCUIT_INSTRUCTIONS + TOOL_INSTRUCTIONS + VISION_TOOL_INSTRUCTIONS
+    if version == "coder-v3":
+        return INSTRUCTIONS + TOOL_INSTRUCTIONS
     if version in {"coder-v1", "coder-v2"}:
         return INSTRUCTIONS
     raise ValueError("unsupported instructions version")

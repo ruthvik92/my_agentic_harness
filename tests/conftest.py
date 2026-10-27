@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from local_agent.contracts import (
+    ContextSnapshot,
     ExecutionRequest,
     ModelRequest,
     ModelResponse,
@@ -52,7 +53,11 @@ class Sandbox:
 
     async def execute(self, name, arguments):
         ctx = correlation()
-        snapshot_ref = self.store.blobs.put_json({"payload_ref": self.store.blobs.put_json({})})
+        payload_ref = self.store.blobs.put_json({"messages": [], "tools": []})
+        snapshot_ref = self.store.blobs.put_json(ContextSnapshot(
+            messages=(), tool_definitions=(), payload_ref=payload_ref,
+            payload_hash=digest(self.store.blobs.read(payload_ref)), provenance=(), token_estimate=0,
+        ))
         request = ModelRequest(
             request_id=new_id("req"),
             run_id=self.run_id,

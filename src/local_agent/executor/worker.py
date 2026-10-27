@@ -3,15 +3,18 @@
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
+import tempfile
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 ROOT = "/workspace"
 MAX_FILE = 1048576
 ALLOWED = {"project", "memory", "tools", "scratch", "outputs"}
+TRUSTED = "/opt/local-agent"
 
 
 def content_hash(data):
@@ -129,7 +132,27 @@ def walk(fd, prefix, depth):
                     os.close(child)
 
 
-def operate(tool, args):
+def operate(tool, args, environment=None):
+    if tool == "register_tool":
+        if TRUSTED not in sys.path:
+            sys.path.insert(0, TRUSTED)
+        from toolkit.register import register_tool
+        return register_tool(args)
+    if tool == "execute_tool":
+        if TRUSTED not in sys.path:
+            sys.path.insert(0, TRUSTED)
+        from toolkit.execute import execute_tool
+        return execute_tool(args)
+    if tool == "render_pdf_region":
+        if TRUSTED not in sys.path:
+            sys.path.insert(0, TRUSTED)
+        from toolkit.pdf_render import render_pdf_region
+        return render_pdf_region(args)
+    if tool == "view_image":
+        if TRUSTED not in sys.path:
+            sys.path.insert(0, TRUSTED)
+        from toolkit.image_info import view_image
+        return view_image(args)
     if tool == "read_file":
         with parent(args["path"]) as (fd, name):
             data = read_at(fd, name)
@@ -197,7 +220,7 @@ def operate(tool, args):
         return {"matches": found, "truncated": False, "next_offset": None}
     if tool in {"run_command", "git_diff"}:
         cwd = args.get("cwd", args.get("repository", "project"))
-        with directory(cwd) as fd:
+        with ExitStack() as cleanup, directory(cwd) as fd:
             if tool == "run_command":
                 argv = args["argv"]
                 if args.get("helper_manifest"):
@@ -221,7 +244,10 @@ def operate(tool, args):
                     with parent(code_path) as (cfd, name):
                         code = read_at(cfd, name)
                     # Execute the same captured bytes we hashed, isolated from mutable imports.
-                    captured = "/tmp/helper-" + uuid.uuid4().hex + ".py"
+                    temporary = cleanup.enter_context(
+                        tempfile.TemporaryDirectory(prefix="local-agent-helper-", dir="/tmp")
+                    )
+                    captured = os.path.join(temporary, "helper.py")
                     with open(captured, "xb") as stream:
                         stream.write(code)
                     print(
@@ -255,34 +281,101 @@ def operate(tool, args):
                         for path in args.get("paths", [])
                     ],
                 ]
+            base_env = {
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "HOME": "/tmp",
+                "LANG": "C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+            }
+            if environment:
+                base_env.update(environment)
             result = subprocess.run(
                 argv,
                 cwd=f"/proc/self/fd/{fd}",
                 check=False,
-                env={
-                    "PATH": "/usr/local/bin:/usr/bin:/bin",
-                    "HOME": "/tmp",
-                    "LANG": "C.UTF-8",
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                    "GIT_CONFIG_NOSYSTEM": "1",
-                    "GIT_CONFIG_GLOBAL": "/dev/null",
-                },
+                env=base_env,
             )
             return result.returncode
     raise ValueError("unknown tool")
 
 
+ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+FIXED_SAFETY_ENV = frozenset(
+    {
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
+        "PYTHONDONTWRITEBYTECODE",
+        "PATH",
+        "HOME",
+    }
+)
+MAX_ENV_ENTRIES = 64
+MAX_ENV_VALUE_LEN = 8192
+
+
+def _strict_int(value, field, low, high):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"invalid {field}: must be an integer")
+    if value < low or value > high:
+        raise ValueError(f"invalid {field}: out of range")
+    return value
+
+
+def validate_execution_options(value):
+    """Validate the host-injected '_execution' object.
+
+    Returns a normalized dict with memory_mb, cpu_cores, environment.
+    Never echoes environment values in error messages.
+    """
+    if value is None:
+        return {"memory_mb": 4096, "cpu_cores": 4, "environment": {}}
+    if not isinstance(value, dict):
+        raise ValueError("invalid _execution: must be an object")
+    allowed = {"memory_mb", "cpu_cores", "environment"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError("invalid _execution: unknown options")
+    memory_mb = _strict_int(
+        value.get("memory_mb", 4096), "memory_mb", 64, 4096
+    )
+    cpu_cores = _strict_int(value.get("cpu_cores", 4), "cpu_cores", 1, 4)
+    env = value.get("environment", {})
+    if not isinstance(env, dict):
+        raise ValueError("invalid environment: must be an object")
+    if len(env) > MAX_ENV_ENTRIES:
+        raise ValueError("invalid environment: too many entries")
+    normalized = {}
+    for key, val in env.items():
+        if not isinstance(key, str) or not ENV_KEY_RE.fullmatch(key):
+            raise ValueError("invalid environment key")
+        if "\x00" in key:
+            raise ValueError("invalid environment key")
+        if key in FIXED_SAFETY_ENV:
+            raise ValueError("invalid environment key: fixed safety variable")
+        if not isinstance(val, str):
+            raise ValueError("invalid environment value: must be a string")
+        if "\x00" in val:
+            raise ValueError("invalid environment value")
+        if len(val) > MAX_ENV_VALUE_LEN:
+            raise ValueError("invalid environment value: too long")
+        normalized[key] = val
+    return {"memory_mb": memory_mb, "cpu_cores": cpu_cores, "environment": normalized}
+
+
 def main():
-    attest_limits()
     request = json.loads(sys.stdin.buffer.read(2 * MAX_FILE))
-    result = operate(request["tool"], request["arguments"])
+    options = validate_execution_options(request.get("_execution"))
+    attest_limits(memory_mb=options["memory_mb"], cpu_cores=options["cpu_cores"])
+    result = operate(request["tool"], request["arguments"], environment=options["environment"])
     if isinstance(result, int):
         return result
     print(json.dumps(result, ensure_ascii=False))
     return 0
 
 
-def attest_limits():
+def attest_limits(memory_mb=4096, cpu_cores=4):
     with open("/proc/self/status") as stream:
         status = dict(line.split(":", 1) for line in stream if ":" in line)
     checks = {
@@ -291,13 +384,17 @@ def attest_limits():
         "capabilities": int(status["CapEff"].strip(), 16) == 0,
         "seccomp": status["Seccomp"].strip() == "2",
     }
-    expected = {"memory.max": "4294967296", "memory.swap.max": "0", "pids.max": "128"}
+    expected = {
+        "memory.max": str(memory_mb * 1024 * 1024),
+        "memory.swap.max": "0",
+        "pids.max": "128",
+    }
     for name, value in expected.items():
         with open("/sys/fs/cgroup/" + name) as stream:
             checks[name] = stream.read().strip() == value
     with open("/sys/fs/cgroup/cpu.max") as stream:
         quota, period = stream.read().split()
-        checks["cpu.max"] = quota != "max" and int(quota) / int(period) == 4
+        checks["cpu.max"] = quota != "max" and int(quota) / int(period) == cpu_cores
     if not all(checks.values()):
         raise RuntimeError("effective kernel sandbox protections unavailable")
 

@@ -1,5 +1,13 @@
 # Ask the harness from your phone
 
+> **Legacy — phone-v1 screenshot guide.** This document describes the legacy
+> phone-v1 screenshot interface. The primary guide for browser launching,
+> config selection and the editor is [browser.md](browser.md).
+>
+> To reproduce the legacy screenshot setup, run
+> `./browser --agent config/phone.yaml` — `./phone` now aliases the browser
+> default. The remaining text below is preserved as a legacy reference.
+
 Start the phone interface on the computer that runs Ollama and Docker:
 
 ```bash

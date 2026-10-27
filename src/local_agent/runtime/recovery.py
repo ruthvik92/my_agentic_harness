@@ -3,6 +3,9 @@ from datetime import UTC, datetime
 
 from local_agent.contracts import ExecutionRequest, ExecutionResult, ModelResponse, ToolCall
 from local_agent.executor.docker import OUTPUT_CAP, docker
+from local_agent.runtime.image_capture import capture_image
+from local_agent.runtime.image_messages import image_messages
+from local_agent.runtime.tool_results import result_preview
 from local_agent.storage.blobs import canonical
 
 
@@ -23,12 +26,53 @@ async def reconcile(agent, row):
             raise NeedsReconciliation("recovered result identity mismatch")
         outcome = "published_result"
     else:
-        name = "local-agent-" + execution.execution_id
+        mapping = agent.executor.mapping(execution.execution_id)
+        if mapping:
+            expected = {
+                "execution_id": execution.execution_id, "workspace_id": execution.workspace_id,
+                "run_id": agent.run_id, "tool_call_id": execution.call_id,
+            }
+            if any(mapping.get(key) != value for key, value in expected.items()):
+                raise NeedsReconciliation("execution container mapping identity mismatch")
+            manager = agent.executor.make_manager(
+                lambda kind, data: agent.event(kind, "recovery", data)
+            )
+            if mapping.get("owner") != manager.owner:
+                raise NeedsReconciliation("execution container owner mismatch")
+            if mapping["execution_mode"] == "persistent":
+                # The keeper's logs/exit status cannot prove an exec command's outcome.
+                await manager.stop(
+                    execution.workspace_id, expected_container_id=mapping["container_id"],
+                    expected_execution_id=execution.execution_id,
+                )
+                agent.last = store.reconcile_execution(
+                    agent.run_id, execution.execution_id, None, "unknown",
+                    causes=(agent.last.event_id,),
+                )
+                raise NeedsReconciliation(
+                    "persistent command result was not published; mutation will not be replayed"
+                )
+            if mapping["execution_mode"] != "ephemeral":
+                raise NeedsReconciliation("invalid execution mode in mapping")
+        name = mapping["container_id"] if mapping else "local-agent-" + execution.execution_id
         try:
             info = await agent.executor.inspect(name)
         except RuntimeError:
             info = None
         if info is not None:
+            labels = info["Config"].get("Labels") or {}
+            required = {
+                "local-agent.execution": execution.execution_id,
+                "local-agent.workspace": execution.workspace_id,
+                "local-agent.run": agent.run_id,
+            }
+            if any(labels.get(key) != value for key, value in required.items()) or (
+                mapping and (
+                    info["Id"] != mapping["container_id"]
+                    or labels.get("local-agent.owner") != mapping["owner"]
+                )
+            ):
+                raise NeedsReconciliation("recovery container ownership mismatch")
             inspect_ref = store.blobs.put_json(info)
             active = info["State"]["Running"]
             if active:
@@ -62,6 +106,8 @@ async def reconcile(agent, row):
                     captured_bytes=len(captured),
                 )
                 outcome = "container_logs"
+    if result is not None:
+        capture_image(agent, execution, result)
     agent.last = store.reconcile_execution(
         agent.run_id, execution.execution_id, result, outcome, causes=(agent.last.event_id,)
     )
@@ -197,6 +243,7 @@ async def restore(agent, run_id):
 
         assistant = assistant_message(raw, response)
         group = [assistant]
+        image_execution_ids = []
         call_rows = store.db.execute(
             "SELECT * FROM tool_calls WHERE request_id=?", (row["id"],)
         ).fetchall()
@@ -212,10 +259,14 @@ async def restore(agent, run_id):
                     result = ExecutionResult.model_validate_json(
                         store.blobs.read(attempt["result_ref"])
                     )
+                    execution = ExecutionRequest.model_validate_json(
+                        store.blobs.read(attempt["request_ref"])
+                    )
+                    capture_image(agent, execution, result)
                     await agent.executor.release(attempt["id"])
                 else:
                     result = await reconcile(agent, attempt)
-                content = preview(result)
+                content = result_preview(store, result, call.name)
             elif call_row["rejected"]:
                 rejected = next(
                     e
@@ -249,8 +300,19 @@ async def restore(agent, run_id):
                         resume_validated=bool(call_row["validated_ref"]),
                     )
             if external:
+                if (
+                    result is not None
+                    and result.status == "succeeded"
+                    and call.name in ("render_pdf_region", "view_image")
+                ):
+                    image_execution_ids.append(result.execution_id)
                 group.append(tool_message(call, content))
         if external:
+            group.extend(
+                image_messages(
+                    store, agent.run_id, image_execution_ids, agent.config.provider
+                )
+            )
             agent.groups.append(group)
             agent.restored_completion = None
             if not response.tool_calls:

@@ -95,17 +95,23 @@ such. Fixture tests are deliberately broken and excluded from harness discovery.
 Start with [the five-minute TLDR](docs/tldr.md) or [the detailed guide](docs/guide.md).
 
 See [progress and gotchas](Progress.md), [architecture](docs/architecture.md),
-[executor isolation](docs/executor.md), [context and helpers](docs/context-helpers.md),
+[executor modes, cleanup, and isolation](docs/executor.md), [context and helpers](docs/context-helpers.md),
 [operating procedures](docs/operations.md) and [evaluation results](docs/evaluation-results.md).
 
 For service-manual schematics, use the [circuit workflow](docs/circuits.md) to
 extract high-resolution PDF images and create an explanation and draft netlist.
 
-Ask questions from your phone on the home network with
-`./phone --host 192.168.0.40` (use your computer's LAN address). Open the printed
-URL, enter the terminal pairing code, upload a screenshot and ask a question.
-Follow-ups reuse the screenshot and recent conversation. See the
-[phone interface guide](docs/phone.md) for setup, model/capability dropdowns,
-saved chats and image memory, draft netlist inference, feedback traces and an
-optional paid OpenAI reviewer. Browser authentication uses terminal pairing,
-not OAuth; paired devices share one local owner profile.
+Use the browser interface from any device on the home network with
+`./browser --host 192.168.0.40` (use your computer's LAN IP; omit `--host` for
+localhost only). Open the printed URL, enter the terminal pairing code, then
+select any valid config profile to run. You can also create and edit config
+profiles directly in the browser. Coding tasks require an explicit workspace,
+and circuit tasks require a PDF. See the [browser interface guide](docs/browser.md)
+and the [config guide](docs/configs.md) for setup and profile details. Saved
+image memory, chat history, review and feedback traces remain available.
+Browser authentication uses terminal pairing, not OAuth; paired devices share
+one local owner profile.
+
+Docker execution defaults to ephemeral containers. Tool-enabled profiles can opt into
+workspace-owned persistent sessions with a 30-minute idle timeout; see
+[execution configuration and traces](docs/executor.md).

@@ -1,0 +1,14 @@
+schema_version: 1
+agent_id: browser
+provider: ollama
+model: qwen3.8:27b
+instructions_version: browser-v1
+tools: []
+policy_profile: dev-offline-v1
+window_tokens: 32768
+output_reserve_tokens: 4096
+limits:
+  max_model_turns: 3
+  max_attempted_tool_calls: 6
+  run_timeout_seconds: 600
+  model_timeout_seconds: 300

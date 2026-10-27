@@ -39,6 +39,43 @@ class Limits(Record):
     max_evidence_bytes: int = Field(default=1073741824, ge=1048576, le=1073741824)
 
 
+ExecutionMode = Literal["ephemeral", "persistent"]
+ContainerState = Literal[
+    "CREATED",
+    "STARTING",
+    "RUNNING",
+    "EXECUTING",
+    "IDLE",
+    "STOPPING",
+    "STOPPED",
+    "FAILED",
+    "REMOVED",
+]
+
+
+class ExecutionSettings(Record):
+    """Operator-controlled execution lifecycle settings.
+
+    These are deployment/operator settings, never model-controlled tool
+    arguments.
+    """
+
+    execution_mode_default: ExecutionMode = "ephemeral"
+    max_execution_seconds: int = Field(default=300, ge=1, le=300)
+    persistent_container_idle_timeout: int = Field(default=1800, ge=1, le=86400)
+    max_persistent_containers: int = Field(default=4, ge=1, le=64)
+    container_memory_limit: int = Field(default=4096, ge=64, le=4096)
+    container_cpu_limit: int = Field(default=4, ge=1, le=4)
+    container_network_enabled: bool = False
+
+    @field_validator("container_network_enabled", mode="before")
+    @classmethod
+    def strict_network_flag(cls, value):
+        if type(value) is not bool:
+            raise ValueError("container_network_enabled must be a boolean")
+        return value
+
+
 class AgentConfig(Record):
     agent_id: Name = "coder"
     instructions_version: Name = "coder-v1"
@@ -52,8 +89,15 @@ class AgentConfig(Record):
     tools: tuple[Name, ...] = ("read_file", "run_command")
     policy_profile: Name = "dev-offline-v1"
     limits: Limits = Field(default_factory=Limits)
+    execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     window_tokens: int = Field(default=8192, ge=2048, le=131072)
     output_reserve_tokens: int = Field(default=2048, ge=256, le=32768)
+
+    @model_validator(mode="after")
+    def offline_policy_forbids_network(self):
+        if self.policy_profile == "dev-offline-v1" and self.execution.container_network_enabled:
+            raise ValueError("dev-offline-v1 policy forbids container network access")
+        return self
 
 
 class RunManifest(Record):
@@ -178,6 +222,16 @@ class ExecutionResult(Record):
     attestation_ref: BlobRef | None = None
     captured_bytes: int = Field(default=0, ge=0)
     helper_ref: BlobRef | None = None
+    run_id: ID | None = None
+    workspace_id: ID | None = None
+    tool_call_id: ID | None = None
+    container_id: str | None = Field(default=None, max_length=256)
+    command: tuple[str, ...] | None = None
+    execution_mode: ExecutionMode | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    duration_ms: float | None = Field(default=None, ge=0)
+    error: str | None = Field(default=None, max_length=4096)
 
 
 class DecisionRecord(Record):

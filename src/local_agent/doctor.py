@@ -21,6 +21,12 @@ def sandbox_config(path=None):
     helper = Path(__file__).resolve().parents[2] / "sandbox/pdf_extract.py"
     if config.get("pdf_helper_hash") != digest(helper.read_bytes()):
         raise ValueError("PDF renderer changed; rebuild the pinned sandbox image")
+    toolkit = {
+        p.name: digest(p.read_bytes())
+        for p in sorted((Path(__file__).parent / "executor" / "toolkit").glob("*.py"))
+    }
+    if config.get("toolkit_hashes", {}) != toolkit:
+        raise ValueError("trusted toolkit changed; rebuild the pinned sandbox image")
     return config
 
 

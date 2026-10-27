@@ -46,7 +46,7 @@ Implementation entry points:
 | Providers | `models/` | Native Ollama and OpenAI-compatible inference |
 | Context | `runtime/context.py` | Exact payload, budgets, compaction lineage |
 | Policy | `policy/engine.py` | Deterministic capabilities and hashes |
-| Executor | `executor/docker.py`, `executor/worker.py` | Container lifecycle and trusted in-image operations |
+| Executor | `executor/docker.py`, `executor/lifecycle.py`, `executor/maintenance.py`, `executor/worker.py` | Container lifecycle and trusted in-image operations |
 | Storage | `storage/database.py`, `storage/blobs.py` | Durable records and immutable evidence |
 | Recovery | `runtime/recovery.py` | History restoration and reconciliation |
 | Inspection | `observability/audit.py`, `observability/browser.py` | Read-only audit and browser traces |
@@ -169,7 +169,7 @@ Containers mount only their workspace, run as the current non-root UID/GID, use
 an offline network namespace and read-only image, drop all capabilities, and enable
 no-new-privileges/seccomp. Limits are checked both through Docker inspection and
 actual in-container kernel/cgroup values. No GPU devices, host credentials or
-Docker socket are passed. Commands receive a fixed minimal environment.
+Docker socket are passed. Commands receive a minimal environment; the trusted host API can supply validated per-command additions.
 
 Output streams are drained concurrently with a total 10 MiB capture cap and
 16 KiB preview. Floods and timeouts terminate the container and descendants.
@@ -300,3 +300,10 @@ netlists and the review required before simulation.
 
 For event fields, evidence navigation and final-status interpretation, see
 [how to interpret runs and traces](traces.md).
+
+## Persistent execution
+
+Tool-enabled agent configurations may opt into `execution.execution_mode_default: persistent`.
+The host manager owns workspace-bound keepers, serializes execution and cleanup, and starts
+an idle reaper. Ephemeral remains the compatibility default. See [Docker lifecycle](executor.md)
+for configuration, recovery without replaying uncertain commands, and maintenance audit runs.

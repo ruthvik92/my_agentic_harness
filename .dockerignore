@@ -7,3 +7,5 @@
 !src/local_agent
 !src/local_agent/executor
 !src/local_agent/executor/worker.py
+!src/local_agent/executor/toolkit
+!src/local_agent/executor/toolkit/*.py

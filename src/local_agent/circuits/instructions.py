@@ -34,3 +34,10 @@ analysis/file.md without a project/ prefix. To read a whole graph use read_file 
 for safe edits. Commands execute offline in Docker. Do not edit or remove the supplied PDF or evidence images.
 Stop after saving the graph and explanation. Your final response proposes completion, never circuit verification.
 """
+
+VISION_TOOL_INSTRUCTIONS = """Use render_pdf_region(pdf='project/...', page, normalized top-left region, dpi 600 or 1200)
+to inspect ambiguous symbols, designators or junctions; render one crop at a time. The next model turn
+receives the image; inspect it before completion. view_image handles helper PNG/JPEG output.
+Cite the original PDF page and region for every visual claim. Do not invent a class, value or pins;
+retain uncertainty and keep the existing at-most-4-component rules.
+"""

@@ -137,7 +137,10 @@ def test_circuit_docker_end_to_end(tmp_path, request, repair_distinct_errors):
     source = tmp_path / "case"
     source.mkdir()
     make_pdf(source / "manual.pdf")
+    prepared_pdf_hash = digest((source / "manual.pdf").read_bytes())
     config = load_config(Path("config/analog.yaml"))
+    tools = tuple(dict.fromkeys(list(config.tools) + ["render_pdf_region", "view_image"]))
+    config = config.model_copy(update={"tools": tools})
     graphs = []
     if repair_distinct_errors:
         duplicate = graph_data()
@@ -156,7 +159,23 @@ def test_circuit_docker_end_to_end(tmp_path, request, repair_distinct_errors):
             oversized["components"].append(component)
         graphs.extend([duplicate, wrong_page, missing_value, oversized])
     graphs.append(graph_data())
-    responses = []
+    responses = [
+        {
+            "text": "",
+            "tool_calls": [
+                {
+                    "name": "render_pdf_region",
+                    "arguments": {
+                        "pdf": "project/manual.pdf",
+                        "page": 1,
+                        "region": [0.1, 0.1, 0.6, 0.6],
+                        "dpi": 300,
+                    },
+                }
+            ],
+            "finish_status": "tool_calls",
+        }
+    ]
     previous = None
     for index, graph in enumerate(graphs):
         content = json.dumps(graph)
@@ -198,13 +217,38 @@ def test_circuit_docker_end_to_end(tmp_path, request, repair_distinct_errors):
         assert result["status"] == "completed_unverified", result
         assert result["circuit"]["emitted_passives"] == ["R1"]
         assert audit(store, result["run_id"])["ok"]
+        snapshot = store.blobs.json(provider.requests[1].context_ref)
+        payload = store.blobs.json(snapshot["payload_ref"])
+        last3 = payload["messages"][-3:]
+        assert [m["role"] for m in last3] == ["assistant", "tool", "user"]
+        assert last3[-1]["images"]
         exported = Path(agent.export_case(source, result))
         assert (source / "netlists" / result["run_id"] / "draft.cir").read_text().endswith(".end\n")
         assert (exported / "explanation.md").exists()
+        manifest = json.loads(
+            (
+                source
+                / "extracted"
+                / result["run_id"]
+                / "extraction-manifest.json"
+            ).read_text()
+        )
+        adaptive = manifest["adaptive_images"]
+        assert len(adaptive) == 1
+        image_entry = adaptive[0]
+        assert image_entry["source"]["page"] == 1
+        assert image_entry["source"]["sha256"] == prepared_pdf_hash
+        image_ref = image_entry["image_ref"]
+        assert store.blobs.read(image_ref) == (
+            source / "extracted" / result["run_id"] / image_entry["exported_path"]
+        ).read_bytes()
         prepared = agent.prepared()
         assert len(prepared["images"]) == 2
         refs, _ = roots(store, result["run_id"])
         assert prepared["images"][0]["evidence_ref"] in refs
+        assert image_ref in refs
+        assert image_entry["attachment_ref"] in refs
+        assert prepared["images"][1]["evidence_ref"] in refs
         assert any(
             e.event_type == "circuit.prepared" and e.data["input_ref"] in refs
             for e in store.events(result["run_id"])

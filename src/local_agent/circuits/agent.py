@@ -10,6 +10,7 @@ from local_agent.circuits.contracts import CircuitGraph
 from local_agent.circuits.netlist import compile_netlist, graph_schema
 from local_agent.contracts import ArtifactRecord, new_id
 from local_agent.runtime.agent import Agent
+from local_agent.runtime.image_records import tool_images
 from local_agent.storage.blobs import digest
 
 
@@ -42,8 +43,8 @@ class CircuitAgent(Agent):
         self, *args, pdf=None, page=None, dpi=300, region=None, context_page=None, **kwargs
     ):
         super().__init__(*args, **kwargs)
-        if self.config.instructions_version != "analog-v1":
-            raise ValueError("circuit workflow requires analog-v1 instructions")
+        if self.config.instructions_version not in {"analog-v1", "analog-v2"}:
+            raise ValueError("circuit workflow requires analog instructions")
         self.pdf, self.page, self.dpi = pdf, page, dpi
         self.region, self.context_page = region, context_page
 
@@ -222,6 +223,11 @@ class CircuitAgent(Agent):
                     "and put other missing coverage in unresolved. Do not invent missing values or connections."
                 )
             allowed = {v["page"] for v in self.prepared()["images"]}
+            pdf_hash = self.prepared().get("pdf_hash")
+            for descriptor in tool_images(self.store, self.run_id):
+                source = descriptor.get("source")
+                if isinstance(source, dict) and source.get("sha256") == pdf_hash:
+                    allowed.add(source["page"])
             if not set(graph.pages) <= allowed:
                 raise ValueError("graph cites pages not supplied as image evidence")
         except (ValueError, OSError) as exc:
@@ -298,6 +304,19 @@ class CircuitAgent(Agent):
             target = directories["extracted"] / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(self.store.blobs.read(item["evidence_ref"]))
+        adaptive_images = []
+        for descriptor in tool_images(self.store, self.run_id):
+            data = self.store.blobs.read(descriptor["image_ref"])
+            execution_id = descriptor["execution_id"]
+            suffix = ".png" if data.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg"
+            relative = "tool-images/" + execution_id + suffix
+            target = directories["extracted"] / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            augmented = dict(descriptor)
+            augmented["exported_path"] = relative
+            adaptive_images.append(augmented)
+        manifest["adaptive_images"] = adaptive_images
         (directories["extracted"] / "extraction-manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n"
         )

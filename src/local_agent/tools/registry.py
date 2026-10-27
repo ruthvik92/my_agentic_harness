@@ -12,6 +12,12 @@ from local_agent.contracts import (
     WriteFileArgs,
 )
 from local_agent.storage.blobs import canonical
+from local_agent.tools.extensions import (
+    ExecuteToolArgs,
+    RegisterToolArgs,
+    RenderPdfRegionArgs,
+    ViewImageArgs,
+)
 
 SCHEMAS = {
     "read_file": ReadFileArgs,
@@ -21,7 +27,35 @@ SCHEMAS = {
     "list_files": ListFilesArgs,
     "search_files": SearchFilesArgs,
     "git_diff": GitDiffArgs,
+    "register_tool": RegisterToolArgs,
+    "execute_tool": ExecuteToolArgs,
+    "view_image": ViewImageArgs,
+    "render_pdf_region": RenderPdfRegionArgs,
 }
+
+
+def _description(name: str) -> str:
+    if name == "register_tool":
+        return (
+            "Register a Python helper created under tools/ in the run-local "
+            "registry, recording its metadata and JSON-schema parameters."
+        )
+    if name == "execute_tool":
+        return (
+            "Execute a previously registered tool offline by passing its JSON "
+            "arguments on stdin to the sandbox worker."
+        )
+    if name == "view_image":
+        return (
+            "Deliver a PNG/JPEG image from the sandbox as evidence to the "
+            "vision model."
+        )
+    if name == "render_pdf_region":
+        return (
+            "Render a normalized crop of a PDF page at the requested DPI and "
+            "deliver the image, identified by page and region."
+        )
+    return f"Version {VERSIONS[name]} {name}; workspace-relative paths."
 
 
 VERSIONS = {name: 1 for name in SCHEMAS}
@@ -35,7 +69,7 @@ def definitions() -> tuple[dict, ...]:
             "type": "function",
             "function": {
                 "name": name,
-                "description": f"Version {VERSIONS[name]} {name}; workspace-relative paths.",
+                "description": _description(name),
                 "parameters": schema.model_json_schema(),
             },
         }

@@ -84,7 +84,7 @@ def roots(store, run_id):
         if event.event_type == "context.compacted":
             for ref in event.data["inputs"]:
                 add(ref)
-        if event.event_type == "screenshot.prepared":
+        if event.event_type in ("screenshot.prepared", "browser.prepared"):
             record(event.data["input_ref"], ("image_ref", "history_ref"))
     return refs, manifest
 
