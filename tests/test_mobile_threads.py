@@ -92,7 +92,7 @@ def test_models_memory_feedback_netlist_and_paid_review(tmp_path, monkeypatch):
         return {"status": "completed_unverified", "answer": "Visible R1 and uncertain junction"}
 
     root = tmp_path / "state"
-    with running(root, runner) as (server, client):
+    with running(root, runner, verifier_path="examples/configs/openai-reviewer.yaml") as (server, client):
         assert client.get("/api/threads").status_code == 401
         login(server, client)
         assert "test-server-only-key" not in client.get("/api/models").text

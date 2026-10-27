@@ -34,7 +34,9 @@ with tempfile.TemporaryDirectory(prefix="local-agent-browser-", dir=source) as d
             "run_id": None,
         }
 
-    server = PhoneServer(directory / "state", Path("config/phone.yaml"), port=0, runner=runner)
+    server = PhoneServer(directory / "state", Path("config/browser.yaml"), port=0, runner=runner,
+        verifier_path=Path("examples/configs/openai-reviewer.yaml"),
+    )
     server.models.catalog = lambda **_kwargs: {
         "models": [
             {

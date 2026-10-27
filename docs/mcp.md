@@ -30,7 +30,7 @@ no network listener, no OAuth flow. No paid verifier or OpenAI key is forwarded.
   content-hash reference; no arbitrary blob read capability.
 - `harness_screenshot(question, image_path=None, image_base64=None, history=None, model=None)`
   — exactly one image; PNG/JPEG ≤ 4 MiB raw base64 (no dataURL); host image under an
-  allowed root; history max 12 messages, 16000 chars total; `config/phone.yaml`;
+  allowed root; history max 12 messages, 16000 chars total; `config/browser.yaml`;
   requires native vision. Client owns chat memory — pass `history` explicitly; runs durable.
 - `harness_circuit(case, pdf, page, question, region=None, model=None)` — PDF relative to
   an allowed case, no parent traversal; page 1-based; `region [x0,y0,x1,y1]` normalized,

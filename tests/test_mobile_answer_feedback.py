@@ -19,7 +19,9 @@ def test_answer_feedback_is_attributed_and_independent_of_thread_vote(tmp_path, 
         return {"status": "completed_unverified", "answer": "**Unverified** answer"}
 
     root = tmp_path / "state"
-    with running(root, runner) as (server, client):
+    with running(
+        root, runner, verifier_path="examples/configs/openai-reviewer.yaml"
+    ) as (server, client):
         assert (
             client.post(
                 "/api/threads/" + "a" * 32 + "/answers/" + "b" * 32 + "/feedback",

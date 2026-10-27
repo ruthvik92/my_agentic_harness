@@ -1,9 +1,18 @@
 # Local agent harness
 
-A sequential local coding agent built from [the guide](docs/history/local-agent-build-guide.md).
+A local harness for browser chat, coding tasks, and analog schematic investigation.
+The original design is preserved in [the historical build guide](docs/history/local-agent-build-guide.md).
 Native Ollama or an OpenAI-compatible Chat Completions API performs inference. All generated commands, edits and helpers
 run in non-root, offline Docker containers. SQLite and immutable blobs retain
 inputs, decisions, execution outcomes and restart evidence.
+
+| Workflow | Active profile | Guide |
+|---|---|---|
+| Browser access and screenshots | `config/browser.yaml` | [Browser](docs/browser.md) |
+| Analog circuit investigation | `config/analog.yaml` | [Circuits](docs/circuits.md) |
+| Coding tasks | `config/coder.yaml` | [Quick start](docs/tldr.md) |
+
+Start `./browser` to select any of these profiles through the paired web interface.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -49,7 +58,7 @@ viewer. Keep the terminal running; press Ctrl+C to stop. Use
 `./traces --port 8766` to choose another port. You can also launch it from anywhere
 using `/home/ruthvik/my_agentic_harness/traces`.
 
-Use `--agent config/openai-local.yaml` to test the OpenAI-compatible interface
+Use `--agent examples/configs/openai-local.yaml` to test the OpenAI-compatible interface
 against local Ollama. For hosted OpenAI, configure its HTTPS base URL, exact model
 ID and API-key environment variable as described in the
 [detailed guide](docs/guide.md#model-providers). Credentials stay outside YAML and
@@ -115,3 +124,10 @@ one local owner profile.
 Docker execution defaults to ephemeral containers. Tool-enabled profiles can opt into
 workspace-owned persistent sessions with a 30-minute idle timeout; see
 [execution configuration and traces](docs/executor.md).
+
+Repository organization: `config/` contains the three active browser, analog,
+and coding profiles plus sandbox metadata. Optional configs are in
+[examples/configs](examples/configs/README.md); personal circuit investigations
+and development snapshots live outside the checkout. See the
+[documentation index](docs/README.md) and [repository layout](docs/repository-layout.md)
+for current paths, the preserved investigation, and backup recovery.

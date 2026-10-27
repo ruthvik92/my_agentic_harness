@@ -35,7 +35,10 @@ def test_account_discovery_filters_supported_reviewers_and_keeps_key_private(mon
         "Client",
         lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(endpoint)),
     )
-    models = Models(load_config(Path("config/phone.yaml")))
+    models = Models(
+        load_config(Path("config/browser.yaml")),
+        verifier_path=Path("examples/configs/openai-reviewer.yaml"),
+    )
     reviewer = models.review_catalog()
     assert reviewer["default_id"] == "openai:gpt-6-astra"
     assert {m["model"] for m in reviewer["models"] if m["selectable"]} == {
@@ -69,7 +72,10 @@ def test_discovery_rejects_invalid_key_without_exposing_error_body(monkeypatch):
             ),
         ),
     )
-    report = Models(load_config(Path("config/phone.yaml"))).review_catalog()
+    report = Models(
+        load_config(Path("config/browser.yaml")),
+        verifier_path=Path("examples/configs/openai-reviewer.yaml"),
+    ).review_catalog()
     assert not report["enabled"]
     assert "HTTP 401" in report["reason"]
     assert "fake-secret" not in json.dumps(report)
@@ -78,7 +84,7 @@ def test_discovery_rejects_invalid_key_without_exposing_error_body(monkeypatch):
 def test_reasoning_chat_request_uses_supported_parameters_and_budget(tmp_path):
     store = Store(tmp_path)
     try:
-        cfg = load_config(Path("config/phone-verifier.yaml"))
+        cfg = load_config(Path("examples/configs/openai-reviewer.yaml"))
         snapshot, _ = ContextBuilder(store.blobs, cfg).build(
             [{"role": "user", "content": "Review this circuit"}], []
         )

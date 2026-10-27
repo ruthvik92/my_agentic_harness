@@ -8,16 +8,29 @@ This document describes the agent configuration files in `config/`. Each YAML fi
 |------|----------|----------|-------|--------------|-------|--------|---------|-------|
 | `coder.yaml` | `coder` | `ollama` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v3` | 9 | 65536 | 16384 | Local Ollama coding agent |
 | `analog.yaml` | `analog` | `ollama` | `qwen3.8:27b` | `analog-v2` | 11 | 65536 | 16384 | Local Ollama PDF circuit analysis |
-| `browser.yaml` | `browser` | `ollama` | `qwen3.8:27b` | `browser-v1` | 0 | 32768 | 4096 | Screenshot chat; same screenshot budgets as phone |
-| `phone.yaml` | `phone` | `ollama` | `qwen3.8:27b` | `phone-v1` | 0 | 32768 | 4096 | Legacy screenshot/chat profile (no execution tools) |
-| `phone-verifier.yaml` | `phone-verifier` | `openai` | `gpt-6-astra` | `phone-v1` | 0 | 65536 | 16384 | Advisory paid OpenAI review (official API) |
-| `openai-local.yaml` | `coder` | `openai` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v2` | 7 | 8192 | 2048 | OpenAI protocol at `http://127.0.0.1:11434/v1`, `api_key_env: null` |
+| `browser.yaml` | `browser` | `ollama` | `qwen3.8:27b` | `browser-v1` | 0 | 32768 | 4096 | Default browser and screenshot chat |
 
 `sandbox.json` is separate infrastructure, not an agent profile. It pins the Docker image ID plus worker/verifier/PDF/toolkit fingerprints and is regenerated with `uv run --locked local-agent build-sandbox`. It is never used for agent selection.
 
+## Optional examples and legacy compatibility
+
+Only the three profiles above ship in the active directory. `examples/configs/`
+holds `openai-local.yaml` for local protocol compatibility and
+`openai-reviewer.yaml` for explicitly enabled external review. Neither appears
+in the browser selector. To enable the reviewer, launch:
+
+```bash
+./browser --verifier-agent examples/configs/openai-reviewer.yaml
+```
+
+The reviewer is disabled when this option is omitted, even if an API key exists.
+The screenshot CLI and MCP screenshot tool default to `browser.yaml`.
+`phone-v1` remains supported for saved runs and explicit custom configurations;
+its old sample lives only under `tests/fixtures/configs/phone.yaml`.
+
 ## Field descriptions
 
-- **`agent_id`**: Logical, non-unique label for the agent (used in traces and CLI). It is not enforced to be unique across configs; `openai-local.yaml` intentionally reuses `coder`.
+- **`agent_id`**: Logical, non-unique label for the agent (used in traces and CLI). It is not enforced to be unique across configs; the optional compatibility example intentionally reuses `coder`.
 - **`provider`**: Inference provider (`ollama` or `openai`).
 - **`model`**: Model identifier (exact tag required for Ollama).
 - **`base_url`**: API endpoint string for the OpenAI provider. Ignored for Ollama.

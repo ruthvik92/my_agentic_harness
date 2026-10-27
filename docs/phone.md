@@ -4,9 +4,11 @@
 > phone-v1 screenshot interface. The primary guide for browser launching,
 > config selection and the editor is [browser.md](browser.md).
 >
-> To reproduce the legacy screenshot setup, run
-> `./browser --agent config/phone.yaml` — `./phone` now aliases the browser
-> default. The remaining text below is preserved as a legacy reference.
+> `./phone` now uses `config/browser.yaml`, as does the screenshot CLI.
+> The old phone profile is retained only as a compatibility test fixture.
+> External review is disabled unless explicitly enabled with
+> `--verifier-agent examples/configs/openai-reviewer.yaml`.
+> The remaining text below is preserved as a compatibility reference.
 
 Start the phone interface on the computer that runs Ollama and Docker:
 
@@ -29,7 +31,7 @@ The full command is:
 
 ```bash
 uv run --locked local-agent phone-web \
-  --host 192.168.0.40 --port 8767 --agent config/phone.yaml
+  --host 192.168.0.40 --port 8767 --agent config/browser.yaml
 ```
 
 Without `--host`, the server binds to `127.0.0.1` for access from the computer.
@@ -135,7 +137,8 @@ local owner and related model run IDs. Repeating the same vote is idempotent.
 
 ## Paid OpenAI review
 
-The reviewer uses [config/phone-verifier.yaml](../config/phone-verifier.yaml),
+Enable the reviewer with `./browser --verifier-agent examples/configs/openai-reviewer.yaml`.
+It uses [examples/configs/openai-reviewer.yaml](../examples/configs/openai-reviewer.yaml),
 defaulting to **gpt-6-astra** through the official OpenAI API. It supports image
 input and Chat Completions ([official model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra)).
 The **OpenAI reviewer (paid)** dropdown is independent of the local vision/chat
@@ -276,7 +279,7 @@ Run `uv sync --locked` after updating the harness. Docker must have the pinned
 sandbox image from `local-agent build-sandbox`, and Ollama must be running. The
 phone never needs Docker, UV, Ollama, or an API key.
 
-[config/phone.yaml](../config/phone.yaml) selects **qwen3.8:27b**, the installed
+[config/browser.yaml](../config/browser.yaml) selects **qwen3.8:27b**, the installed
 vision model. The phone assistant advertises no model tools. It uses the existing
 durable runtime for model requests, evidence capture and audit, including short
 Docker operations for initializing its isolated workspace and capturing its final

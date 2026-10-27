@@ -52,7 +52,7 @@ verifier for tasks it was not designed to check.
 To keep inference local while using the OpenAI wire format:
 
 ```bash
-uv run --locked local-agent run --agent config/openai-local.yaml \
+uv run --locked local-agent run --agent examples/configs/openai-local.yaml \
   --repo tests/fixtures/broken_repo --task-file tests/fixtures/task.md --verify-fixture
 ```
 

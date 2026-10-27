@@ -5,7 +5,7 @@ from local_agent.contracts import AgentConfig
 
 
 def choose(kind: str, model: str | None, catalog: dict, root: Path) -> AgentConfig:
-    filenames = {"coding": "coder.yaml", "screenshot": "phone.yaml", "circuit": "analog.yaml"}
+    filenames = {"coding": "coder.yaml", "screenshot": "browser.yaml", "circuit": "analog.yaml"}
     if kind not in filenames:
         raise ValueError(f"Unknown kind: {kind}")
     cfg = load_config(root / "config" / filenames[kind])

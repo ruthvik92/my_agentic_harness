@@ -66,7 +66,7 @@ def test_followup_image_formats_and_context_without_tools(tmp_path, provider, fo
     prepared_ref = blobs.put_json(
         {"image_ref": blobs.put(raw), "mime": mime, "history_ref": blobs.put_json(history)}
     )
-    cfg = load_config(Path("config/phone.yaml")).model_copy(update={"provider": provider})
+    cfg = load_config(Path("tests/fixtures/configs/phone.yaml")).model_copy(update={"provider": provider})
     agent = object.__new__(ScreenshotAgent)
     agent.store = SimpleNamespace(
         blobs=blobs,
@@ -88,7 +88,9 @@ def test_followup_image_formats_and_context_without_tools(tmp_path, provider, fo
     assert "tools" not in blobs.json(snapshot.payload_ref)
 
 
-@pytest.mark.parametrize("agent_config", ["phone.yaml", "phone-verifier.yaml"])
+@pytest.mark.parametrize("agent_config", [
+    "tests/fixtures/configs/phone.yaml", "examples/configs/openai-reviewer.yaml",
+])
 def test_screenshot_uses_durable_runtime_and_audits(tmp_path, request, agent_config):
     from local_agent.doctor import sandbox_config
 
@@ -99,7 +101,7 @@ def test_screenshot_uses_durable_runtime_and_audits(tmp_path, request, agent_con
     source.mkdir()
     store = Store(tmp_path / "state")
     raw = screenshot()
-    cfg = load_config(Path("config") / agent_config)
+    cfg = load_config(Path(agent_config))
     provider = ScriptedProvider(
         responses=({"text": "A test screenshot.", "tool_calls": [], "finish_status": "stop"},)
     )
@@ -144,7 +146,7 @@ def test_review_capture_budget_failure_recovers_without_model_replay(
     source = tmp_path / "source"
     source.mkdir()
     store = Store(root)
-    cfg = load_config(Path("config/phone-verifier.yaml"))
+    cfg = load_config(Path("examples/configs/openai-reviewer.yaml"))
     cfg = cfg.model_copy(
         update={"limits": cfg.limits.model_copy(update={"max_attempted_tool_calls": 1})}
     )

@@ -211,7 +211,7 @@ def test_openai_factory_runtime_and_audit_with_real_docker(tmp_path, request):
     if image is None:
         pytest.skip("requires --docker-image")
     store = Store(tmp_path / "data")
-    cfg = load_config(Path("config/openai-local.yaml"))
+    cfg = load_config(Path("examples/configs/openai-local.yaml"))
     calls = []
 
     def server(incoming):
@@ -254,7 +254,7 @@ def test_openai_resume_preserves_provider_tool_id_without_redispatch(tmp_path, r
     if image is None:
         pytest.skip("requires --docker-image")
     store = Store(tmp_path / "data")
-    cfg = load_config(Path("config/openai-local.yaml"))
+    cfg = load_config(Path("examples/configs/openai-local.yaml"))
     wires = []
 
     def server(incoming):

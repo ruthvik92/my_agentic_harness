@@ -24,7 +24,7 @@ REVIEW_MODELS = {
 class Models:
     def __init__(self, config, verifier_path=None):
         self.config = config
-        self.verifier_path = Path(verifier_path or "config/phone-verifier.yaml").absolute()
+        self.verifier_path = Path(verifier_path).absolute() if verifier_path is not None else None
         self.lock = threading.Lock()
         self.cached, self.expires = None, 0
 
@@ -104,9 +104,11 @@ class Models:
             "default_id": "",
             "models": [],
             "enabled": False,
-            "reason": "Verifier config missing",
+            "reason": "Reviewer disabled; supply --verifier-agent to enable it",
             "error": None,
         }
+        if self.verifier_path is None:
+            return reviewer
         try:
             cfg = self.verifier_config()
         except (OSError, ValueError) as exc:
@@ -197,6 +199,8 @@ class Models:
         return cfg, item
 
     def verifier_config(self):
+        if self.verifier_path is None:
+            raise ValueError("Reviewer disabled; supply --verifier-agent to enable it")
         cfg = load_config(self.verifier_path)
         if (
             cfg.provider != "openai"

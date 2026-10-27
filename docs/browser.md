@@ -21,9 +21,9 @@ By default the server reads `config/browser.yaml`, binds to `127.0.0.1`, and
 listens on port `8767`. Open `http://127.0.0.1:8767` in a browser.
 
 `./phone` and the phone-web entry point remain aliases for the same server,
-using the same default `config/browser.yaml` profile. To use the legacy
-`config/phone.yaml` profile, pass it explicitly with `--agent`. Existing
-`phone_session` cookies
+using the same default `config/browser.yaml` profile. The screenshot CLI and MCP
+screenshot tool use this profile too. The old phone profile now exists only as
+a compatibility test fixture. Existing `phone_session` cookies
 and data under `~/.local/share/local-agent/phone` keep saved chats compatible
 with the browser interface.
 
@@ -69,6 +69,18 @@ browser. CONFIG selection or editing does not invoke inference; generating answe
 requesting reviews through a paid remote OpenAI API may incur charges. `openai-local.yaml` uses the
 OpenAI protocol against a local Ollama endpoint and is not a paid remote
 profile. Editing config never invokes a model.
+
+Only `browser.yaml`, `analog.yaml`, and `coder.yaml` ship in the active config
+directory. Optional compatibility examples are under `examples/configs/` and
+do not appear in the selector. The external reviewer is disabled by default;
+enable it explicitly with:
+
+```bash
+./browser --verifier-agent examples/configs/openai-reviewer.yaml
+```
+
+An API key alone does not enable reviewer discovery or requests. See
+[optional configurations](../examples/configs/README.md).
 
 ## Workflow
 

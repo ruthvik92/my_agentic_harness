@@ -132,7 +132,7 @@ multimodal input and streaming are separate future adapters. Output uses
 The configured window is a harness input budget, not a remotely set context size.
 No sampling/reasoning parameters are silently imposed on OpenAI models.
 
-`config/openai-local.yaml` targets Ollama's compatible `/v1` endpoint with the
+`examples/configs/openai-local.yaml` targets Ollama's compatible `/v1` endpoint with the
 selected Q8 model and no API key. It is useful for testing this transport locally.
 For another compatible server, change the URL and exact model ID. Model-list
 metadata is hashed for change detection but does not identify hosted model weights;

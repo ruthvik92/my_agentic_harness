@@ -17,8 +17,11 @@ from local_agent.mobile.web import PhoneServer
 
 
 @contextmanager
-def running(root, runner):
-    server = PhoneServer(root, Path("config/phone.yaml"), host="127.0.0.1", port=0, runner=runner)
+def running(root, runner, *, verifier_path=None):
+    server = PhoneServer(
+        root, Path("tests/fixtures/configs/phone.yaml"), host="127.0.0.1", port=0,
+        runner=runner, verifier_path=verifier_path,
+    )
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     url = f"http://127.0.0.1:{server.server_port}"
@@ -140,7 +143,7 @@ def test_pairing_access_boundaries_and_submission(tmp_path):
         assert completed(client, second)["status"] == "completed"
         assert captured[0][0] != captured[1][0]
         assert captured[0][0].stat().st_mode & 0o077 == 0
-        assert client.get("/api/jobs/../../config/phone.yaml").status_code in (403, 404)
+        assert client.get("/api/jobs/../../config/browser.yaml").status_code in (403, 404)
 
     def unexpected(path):
         pytest.fail("completed job was silently replayed after restart")

@@ -35,7 +35,10 @@ def main(argv=None):
     browser.add_argument("--host", default="127.0.0.1")
     browser.add_argument("--port", type=int, default=8767)
     browser.add_argument("--agent", type=Path, default=Path("config/browser.yaml"))
-    browser.add_argument("--verifier-agent", type=Path, default=Path("config/phone-verifier.yaml"))
+    browser.add_argument(
+        "--verifier-agent", type=Path, default=None,
+        help="Explicit optional reviewer profile (disabled when omitted)",
+    )
     browser.add_argument("--config-dir", type=Path, default=None)
     browser.add_argument("--allow-root", type=Path, action="append", default=None)
     browser_run = sub.add_parser(
@@ -48,7 +51,7 @@ def main(argv=None):
         "screenshot", help="answer a screenshot question with retained traces"
     )
     screenshot.add_argument("--request", type=Path, required=True)
-    screenshot.add_argument("--agent", type=Path, default=Path("config/phone.yaml"))
+    screenshot.add_argument("--agent", type=Path, default=Path("config/browser.yaml"))
     build = sub.add_parser(
         "build-sandbox", help="provision the trusted Docker image outside the agent loop"
     )
@@ -186,15 +189,19 @@ def main(argv=None):
             from local_agent.config import load_config
             from local_agent.doctor import sandbox_config
             from local_agent.mobile import ScreenshotAgent, validate_request
+            from local_agent.mobile.browser_agent import BrowserAgent
 
             request_path = args.request.absolute()
             request = validate_request(
                 json.loads(read_evidence(request_path.parent, request_path.name, 6 * 1024 * 1024))
             )
             config = load_config(args.agent)
+            if config.instructions_version not in {"browser-v1", "phone-v1"}:
+                raise ValueError("screenshot requires a browser chat profile")
+            runtime = BrowserAgent if config.instructions_version == "browser-v1" else ScreenshotAgent
             with TemporaryDirectory(prefix="local-agent-screenshot-") as source:
                 result = asyncio.run(
-                    ScreenshotAgent(store, config, sandbox_config(), request=request).run(
+                    runtime(store, config, sandbox_config(), request=request).run(
                         Path(source), request["question"]
                     )
                 )
