@@ -8,6 +8,10 @@
     const git = result.git_workspace;
     const heading = document.createElement('strong');
     heading.textContent = git ? 'Agent Git branch' : 'Edited workspace'; panel.appendChild(heading);
+    const task = document.createElement('p');
+    task.textContent = 'Task: ' + (result.task_mode || (git && git.task_mode) || 'new') +
+      ' · Working subdirectory: ' + (result.working_directory || (git && git.working_directory) || '.');
+    panel.appendChild(task);
     const sourcePath = result.source_workspace || (git && git.repository);
     if (typeof sourcePath === 'string' && sourcePath) {
       const source = document.createElement('p');
@@ -16,6 +20,7 @@
     }
     if (git) {
       for (const [label, value] of [
+        ['Workspace ID', git.workspace_id || git.branch.replace(/^agent\//, '')],
         ['Branch', git.branch], ['Base branch', git.base_branch || 'detached HEAD'],
         ['Starting commit', git.base_commit],
         ['Candidate commit', git.candidate_commit || 'Not published; inspect the worktree'],
@@ -23,6 +28,12 @@
       ]) {
         const line = document.createElement('p');
         line.textContent = label + ': ' + value; panel.appendChild(line);
+      }
+      if (window.ConfigControls && window.ConfigControls.continueTask) {
+        const continueButton = document.createElement('button');
+        continueButton.type = 'button'; continueButton.textContent = 'Continue this worktree';
+        continueButton.addEventListener('click', () => window.ConfigControls.continueTask(result));
+        panel.appendChild(continueButton);
       }
       if (git.source_dirty) {
         const dirty = document.createElement('p');

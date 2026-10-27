@@ -3,7 +3,8 @@
 Select `coder.yaml` and enter the **root of a Git repository** in the browser's
 source-workspace field. CLI `local-agent run` uses the same behavior. The host
 creates a new branch named `agent/ws_<workspace-id>` and a linked Git worktree
-from the repository's committed `HEAD`. It leaves your checkout on its existing
+from the current branch's committed `HEAD` by default, or a selected Git revision.
+It leaves your checkout on its existing
 branch and does not include staged, unstaged or untracked edits in the candidate.
 The result records the exact base commit and reports local differences.
 
@@ -11,6 +12,55 @@ Non-Git directories, including a selected subdirectory without its own `.git`
 entry, retain the isolated-copy workflow. The existing calculator fixture is a
 subdirectory of this harness, so its earlier saved run remains a copied workspace.
 Select a Git repository root for new branch-backed runs.
+
+## New tasks, continuation, and task directory
+
+In the browser, select `coder.yaml` and enter the repository root as the source:
+
+- **New task** creates a new worktree. Leave **Starting revision** blank for
+  the source checkout's current `HEAD`, or enter a commit, tag, or branch.
+  The result records the exact resolved commit.
+- **Continue task** accepts a previous managed `ws_<id>` and reuses that same
+  worktree and agent branch, including uncommitted and untracked files. You can
+  also click **Continue this worktree** on a coding result. Keep the source field
+  pointed at the original repository root. A new starting revision cannot be
+  selected while continuing.
+- **Working subdirectory** is relative to the repository root; for the harness
+  calculator example use `tests/fixtures/broken_repo`. Blank means the root for
+  new tasks, or the previous task directory when continuing; enter `.` to return
+  to the root. The model gets the full `project/...` prefix, and commands default
+  to that directory unless they explicitly specify another cwd. File tools still
+  use workspace-relative paths. The directory must exist without symlink traversal.
+
+The directory is a task focus, not an access restriction or sparse checkout.
+The whole committed working tree remains available for dependencies and tests;
+Git objects and history are shared with the source repository.
+
+CLI equivalents:
+
+```bash
+uv run --locked local-agent run --agent config/coder.yaml \
+  --repo /path/to/repository --task-file /tmp/task.md \
+  --base-ref HEAD --working-directory tests/fixtures/broken_repo
+
+uv run --locked local-agent run --agent config/coder.yaml \
+  --repo /path/to/repository --task-file /tmp/next-task.md \
+  --continue-workspace ws_<32-hex-digits>
+```
+
+Continuation creates a fresh run ID and keeps each run's baseline and captured
+diff separately. If the prior task published a candidate, that commit becomes
+the new parent. Otherwise its original base remains the parent. Pending edits
+are retained and included in the next candidate and final diff. Prior run
+results keep their original commit details. Active tasks, unresolved executions,
+unknown workspaces, different source repositories, and externally moved branches
+must be resolved before continuing. Old copied workspaces cannot be continued
+with this Git workflow.
+
+Container persistence is separate: continuation retains workspace files, stops
+any previous keeper, and begins fresh processes. It does not promise to retain
+the previous task's `/tmp`, running services, or chat history. Use `resume` for
+recovery of an interrupted run; **Continue task** starts a new task instead.
 
 ## What appears in the browser
 
@@ -25,13 +75,15 @@ Candidate commit:  <actual published commit>
 Review state:      ready_for_review
 Edited project:    <data-root>/sandboxes/ws_<id>/project
 
-[Copy path]  [View changes]
+[Copy path]  [View changes]  [Continue this worktree]
 ```
 
 The path still uses the harness's existing workspace layout. Its `project/`
 directory is now an actual linked Git worktree, visible through ordinary host
 Git commands. `memory/`, `tools/`, `scratch/`, and `outputs/` remain run-local
-support directories. Opening a saved reply retains the branch and commit details.
+support directories. Continuation also reuses these directories. Opening a saved
+reply retains its captured branch and commit details; its worktree path points
+at the current mutable candidate.
 
 **View changes** loads the captured diff through an authenticated job endpoint;
 it does not use the model's prose or execute a Git command supplied by the model.

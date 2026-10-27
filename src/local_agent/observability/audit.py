@@ -206,9 +206,20 @@ def audit(store, run_id) -> dict:
             )
             if row["validated_ref"]:
                 saved = store.blobs.json(row["validated_ref"])
+                from local_agent.workspace.options import task_arguments
+
+                config = store.blobs.json(manifest.config_ref)
+                request_ref = store.db.execute(
+                    "SELECT request_ref FROM model_requests WHERE id=?", (call.request_id,)
+                ).fetchone()[0]
+                provider = store.blobs.json(request_ref)["provider"]
+                arguments = task_arguments(
+                    call.name, store.blobs.json(call.arguments_ref),
+                    config.get("working_directory", ".") if provider != "harness" else ".",
+                )
                 normalized = normalize(
                     call.name,
-                    store.blobs.json(call.arguments_ref),
+                    arguments,
                     version=call.tool_version,
                     legacy_evidence="evidence_ref" in saved["arguments"],
                 )

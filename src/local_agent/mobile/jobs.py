@@ -174,6 +174,8 @@ class Jobs:
                         "audit",
                         "capability_probe",
                         "git_workspace",
+                        "working_directory",
+                        "task_mode",
                     ):
                         if field in result:
                             job[field] = result[field]

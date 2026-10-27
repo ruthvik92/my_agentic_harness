@@ -246,3 +246,61 @@ was used for authoring or validation.
   pairing code (not recorded here). Live evidence/private startup log:
   `~/.local/share/local-agent-development/browser-execution-controls-20261027T152613Z`.
 - Trusted worker, sandbox image pin and dependencies are unchanged.
+
+## 2026-10-27 — Coding task revisions, continuation and subdirectory focus
+
+The user explicitly authorized direct Codex implementation: “you do it, don't
+have to ask the harness.” Codex authored this implementation, tests and docs.
+The earlier local attempt `run_96bf83104ec24ef98277630ba1e2076e`, using
+`qwen3:30b-a3b-instruct-2507-q8_0`, was cancelled through `local-agent cancel`.
+Its worktree `ws_b6c1be4fdaa1483bb5ff94076cef62eb` had no tracked or untracked
+changes to integrate. It is retained for inspection; it did not author this patch.
+Task briefs, run output, full test log and browser verification are under
+`~/.local/share/local-agent-development/workspace-controls-task/`.
+
+- New coding tasks default to the source checkout's current committed HEAD or
+  accept a safely resolved starting Git ref/commit. Source checkout and branch
+  remain untouched. Selecting an older revision does not itself mark a clean
+  source dirty.
+- Continue accepts a managed Git workspace ID, reuses its branch and files,
+  preserves pending edits and untracked files, and creates a fresh run ID.
+  A published candidate becomes the next parent; an unpublished candidate
+  retains its prior base. Active owners, unresolved executions, mismatched
+  repositories, invalid workspaces, and external branch changes are rejected.
+- Protected baselines now belong to individual runs. Recovery retains legacy
+  baseline lookup and restores captured task options. Normalization, dispatch
+  verification and audit derive command defaults from the captured task
+  directory while preserving raw provider proposals. Trusted harness commands
+  keep their original directories.
+- Browser coding controls expose New/Continue, starting revision, previous
+  workspace ID and working subdirectory. Result cards show task kind, directory
+  and workspace ID, plus a Continue this worktree action. Jobs and saved thread
+  replies preserve result metadata. CLI equivalents are `--base-ref`,
+  `--continue-workspace`, and `--working-directory`.
+- The working directory must be relative, existing, and free of symlink traversal.
+  It focuses prompts and default command/Git-tool directories; file paths remain
+  workspace-relative. It is neither a permission restriction nor a sparse
+  checkout. See [Git workspaces](docs/git-workspaces.md) for examples.
+- Continuation retains workspace files, stops a prior keeper and starts fresh
+  processes. Container persistence, saved conversation history and interrupted
+  run recovery remain distinct from starting a continued task.
+
+Validation:
+
+- Full pinned-image suite: **416 passed in 139.19s**, using
+  `sha256:a4eb1c5633b5e83bbef63da7d23fd3543a0143381809f3314621bdfc1f29ed63`.
+- New Docker tests exercise selected commits, focused/default and explicit
+  command directories, Git-tool defaults, continued published candidates plus
+  pending files, original-source preservation and valid audits for both runs,
+  in ephemeral and persistent modes. Unit tests also cover unpublished
+  continuation, active/unknown workspaces, invalid revisions, path traversal,
+  symlinks, browser request plumbing, saved metadata and UI interactions.
+- `uv run --locked ruff check src/local_agent tests scripts`, `git diff --check`,
+  updated documentation links and CLI help passed. Original calculator fixture
+  source and tests remain unchanged. No worker, image or dependency changes.
+- Restarted the idle browser server at `http://192.168.1.22:8767`. Authenticated
+  checks confirmed the served task controls, continuation action and request
+  plumbing; `/api/info` reports `restart_required: false`. Its private startup
+  log holds the new pairing code; no pairing code is recorded in this document.
+
+Changes remain in the working tree for review; nothing was pushed or merged.

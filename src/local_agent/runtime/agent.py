@@ -5,6 +5,7 @@ import json
 import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from local_agent.config import instruction_text
 from local_agent.contracts import (
@@ -60,7 +61,8 @@ class RunCancelled(RuntimeError):
 
 class Agent:
     def __init__(
-        self, store, config, sandbox, *, provider=None, capability_report=None, fault_hook=None
+        self, store, config, sandbox, *, provider=None, capability_report=None, fault_hook=None,
+        workspace_options=None,
     ):
         self.store, self.config, self.sandbox = store, config, sandbox
         self.workspaces = Workspaces(store.root)
@@ -84,6 +86,10 @@ class Agent:
         self.instructions = instruction_text(config.instructions_version)
         self.verifier = "calculator"
         self.next_model_attempt = 1
+        from local_agent.workspace.options import validate_options
+
+        self.workspace_options = validate_options(workspace_options or {})
+        self.working_directory = self.workspace_options.get("working_directory", ".")
 
     async def run(self, source, task, *, verify_fixture=False, probe=False, resume_run_id=None):
         from local_agent.storage.locks import run_lock
@@ -98,6 +104,8 @@ class Agent:
                     resume_run_id=resume_run_id,
                 )
                 if hasattr(self, "workspace_id"):
+                    result["working_directory"] = self.working_directory
+                    result["task_mode"] = "continue" if self.workspace_options.get("continue_workspace_id") else "new"
                     git_workspace = self.workspaces.git_info(self.workspace_id)
                     if git_workspace:
                         result["git_workspace"] = git_workspace
@@ -113,7 +121,19 @@ class Agent:
         pass
 
     def fixed_messages(self, task):
-        return [{"role": "system", "content": self.instructions}, {"role": "user", "content": task}]
+        messages = [{"role": "system", "content": self.instructions}]
+        if self.config.instructions_version.startswith("coder-"):
+            messages.append(self.directory_message())
+        return [*messages, {"role": "user", "content": task}]
+
+    def directory_message(self):
+        prefix = "project" if self.working_directory == "." else "project/" + self.working_directory
+        return {"role": "system", "content": (
+            f"Task working directory: {prefix}. Start by listing this directory. "
+            "For files named in the task, use this directory as the base. File tool paths "
+            "remain workspace-relative: include the full prefix above. Commands and git_diff "
+            "default to this directory when cwd is omitted. This is task focus, not a permission boundary."
+        )}
 
     async def complete(self, answer, verify_fixture):
         row = self.store.db.execute(
@@ -287,9 +307,14 @@ class Agent:
                 legacy = bool(
                     saved[0] and "evidence_ref" in self.store.blobs.json(saved[0])["arguments"]
                 )
+                arguments = self.store.blobs.json(call.arguments_ref)
+                if not trusted:
+                    from local_agent.workspace.options import task_arguments
+
+                    arguments = task_arguments(call.name, arguments, self.working_directory)
                 normalized = normalize(
                     call.name,
-                    self.store.blobs.json(call.arguments_ref),
+                    arguments,
                     version=call.tool_version,
                     legacy_evidence=legacy,
                 )
@@ -539,16 +564,64 @@ class Agent:
                         else await self.provider.metadata(self.config.model)
                     )
                     if not probe and self.config.instructions_version.startswith("coder-"):
-                        self.workspace_id, self.path = self.workspaces.create_coding(source, self.run_id)
+                        from local_agent.observability.events import TERMINAL
+                        from local_agent.workspace.git import GitWorktrees
+                        from local_agent.workspace.options import check_directory
+
+                        worktrees = GitWorktrees(self.workspaces)
+                        previous = self.workspace_options.get("continue_workspace_id")
+                        if previous:
+                            record = worktrees.load(previous)
+                            if not record:
+                                raise ValueError("Unknown managed Git workspace")
+                            if self.store.run(record["run_id"])["status"] not in TERMINAL:
+                                raise ValueError("Previous task is active; stop or finish it before continuing")
+                            pending = self.store.db.execute(
+                                "SELECT 1 FROM execution_attempts e JOIN tool_calls t ON t.id=e.call_id "
+                                "JOIN model_requests m ON m.id=t.request_id "
+                                "WHERE m.run_id=? AND e.state NOT IN ('finished','reconciled')",
+                                (record["run_id"],),
+                            ).fetchone()
+                            if pending:
+                                raise ValueError("Previous task has unresolved executions; reconcile it first")
+                            if Path(record["repository"]).resolve() != source.resolve(strict=True):
+                                raise ValueError("Workspace belongs to a different source repository")
+                            worktrees.verify(record)
+                            # Quiesce any retained keeper before capturing the next task's state.
+                            container_record = self.store.control / "containers" / (previous + ".json")
+                            if container_record.exists():
+                                from local_agent.executor.maintenance import sweep
+
+                                await sweep(self.store.root, self.sandbox["image"], self.config.execution,
+                                            workspace_id=previous)
+                            self.working_directory = self.workspace_options.get(
+                                "working_directory", record.get("working_directory", ".")
+                            )
+                            check_directory(Path(record["worktree"]), self.working_directory)
+                            worktrees.continue_task(previous, source, self.run_id,
+                                                    working_directory=self.working_directory)
+                            self.workspace_id, self.path = previous, self.workspaces.path(previous)
+                        else:
+                            self.workspace_id, self.path = self.workspaces.create_coding(
+                                source, self.run_id, base_ref=self.workspace_options.get("base_ref", "HEAD")
+                            )
+                            check_directory(self.path / "project", self.working_directory)
+                            record = worktrees.load(self.workspace_id)
+                            if record:
+                                record["working_directory"] = self.working_directory
+                                worktrees.save(record)
                     else:
+                        if self.workspace_options:
+                            raise ValueError("Workspace task options require a coding profile")
                         self.workspace_id, self.path = self.workspaces.create(source)
-                    self.baseline = self.store.control / "baselines" / self.workspace_id
+                    self.baseline = self.store.control / "baselines" / self.run_id
                     private_directory(self.baseline.parent)
-                    copy_tree(
-                        self.path / "project",
-                        self.baseline,
-                        exclude=IMPORT_EXCLUDES,
-                    )
+                    if self.workspaces.git_info(self.workspace_id):
+                        from local_agent.workspace.git import GitWorktrees
+
+                        GitWorktrees(self.workspaces).baseline(self.workspace_id, self.baseline)
+                    else:
+                        copy_tree(self.path / "project", self.baseline, exclude=IMPORT_EXCLUDES)
                     config_ref = self.store.blobs.put_json(
                         {
                             "agent": self.config.model_dump(mode="json"),
@@ -562,6 +635,9 @@ class Agent:
                             "verify_fixture": verify_fixture,
                             "probe": probe,
                             "git_workspace": self.workspaces.git_info(self.workspace_id),
+                            "workspace_options": self.workspace_options,
+                            "working_directory": self.working_directory,
+                            "baseline_id": self.run_id,
                         }
                     )
                     self.last = self.store.create_run(

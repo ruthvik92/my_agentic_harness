@@ -82,4 +82,6 @@ class BrowserAgent(ScreenshotAgent):
             "available tools follow the agent config."
         )
         messages[1] = {"role": "system", "content": diagnostic}
+        if self.config.instructions_version.startswith("coder-"):
+            messages.insert(2, self.directory_message())
         return messages

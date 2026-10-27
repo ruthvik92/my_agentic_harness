@@ -62,6 +62,9 @@ def main(argv=None):
     live.add_argument("--agent", type=Path, default=Path("config/coder.yaml"))
     live.add_argument("--repo", type=Path, required=True)
     live.add_argument("--task-file", type=Path, required=True)
+    live.add_argument("--base-ref", help="Starting Git ref or commit for a new task (default: HEAD)")
+    live.add_argument("--continue-workspace", help="Continue an existing managed Git workspace ID")
+    live.add_argument("--working-directory", help="Task directory relative to the repository root")
     live.add_argument(
         "--verify-fixture",
         action="store_true",
@@ -383,7 +386,12 @@ def main(argv=None):
             async def execute_live():
                 sandbox = sandbox_config()
                 capability = await ensure_capabilities(store, config, sandbox)
-                result = await Agent(store, config, sandbox, capability_report=capability).run(
+                options = {key: value for key, value in {
+                    "base_ref": args.base_ref, "continue_workspace_id": args.continue_workspace,
+                    "working_directory": args.working_directory,
+                }.items() if value is not None}
+                result = await Agent(store, config, sandbox, capability_report=capability,
+                                     workspace_options=options).run(
                     args.repo, task, verify_fixture=args.verifier or args.verify_fixture
                 )
                 result["capability_probe"] = capability

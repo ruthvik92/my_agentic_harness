@@ -14,7 +14,8 @@
     ['config-select', 'config-editor-file', 'config-name', 'config-content', 'config-new',
      'config-clone', 'config-load', 'config-validate', 'config-save', 'config-refresh',
      'workspace-input', 'pdf-input', 'page-input', 'dpi-input', 'context-page-input',
-     'region-input', 'model-select', 'execution-mode'].forEach((id) => { const n = el(id); if (n) n.disabled = d; });
+     'region-input', 'model-select', 'execution-mode', 'task-mode', 'base-ref',
+     'continue-workspace', 'working-directory'].forEach((id) => { const n = el(id); if (n) n.disabled = d; });
   }
   function fillSelect(node, names, current) {
     node.textContent = '';
@@ -25,6 +26,10 @@
     const mode = selected ? selected.mode : '';
     el('workspace-fields').hidden = mode === 'chat';
     el('circuit-fields').hidden = mode !== 'circuit';
+    el('coding-fields').hidden = mode !== 'coding';
+    const continuing = el('task-mode').value === 'continue';
+    el('new-task-fields').hidden = continuing;
+    el('continue-task-fields').hidden = !continuing;
     el('image-fields').hidden = mode === 'circuit';
     const legacyCircuit = mode === 'chat';
     ['legacy-circuit-controls', 'netlist-btn', 'verify-btn', 'verifier-note'].forEach(id => {
@@ -98,6 +103,7 @@
   }
   function bind() {
     if (bound) return; bound = true;
+    el('task-mode').addEventListener('change', updateVisibility);
     el('config-select').addEventListener('change', () => {
       selectRun(el('config-select').value);
       resetModelSelect();
@@ -188,6 +194,18 @@
       if (!ws) throw new Error('workspace is required');
       out.workspace = ws;
     }
+    if (mode === 'coding') {
+      if (el('task-mode').value === 'continue') {
+        const id = el('continue-workspace').value.trim();
+        if (!/^ws_[a-f0-9]{32}$/.test(id)) throw new Error('Enter the previous ws_ workspace ID');
+        out.continue_workspace_id = id;
+      } else {
+        const ref = el('base-ref').value.trim();
+        if (ref) out.base_ref = ref;
+      }
+      const dir = el('working-directory').value.trim();
+      if (dir) out.working_directory = dir;
+    }
     if (mode === 'circuit') {
       const pdf = el('pdf-input').value.trim();
       if (!pdf) throw new Error('pdf is required');
@@ -223,6 +241,23 @@
   window.ConfigControls = {
     init(a, se, oc) { api = a; showError = se || (() => {}); onChange = oc || null; bind(); },
     refresh, busy: (d) => { jobDisabled = !!d; applyDisabled(); },
-    requestFields, mode: () => (selected ? selected.mode : null), models
+    requestFields, mode: () => (selected ? selected.mode : null), models,
+    continueTask(result) {
+      if (jobDisabled || requestActive) return;
+      const coding = profiles.find(p => p.valid && p.mode === 'coding' && p.name === result.profile_name) ||
+        (selected && selected.mode === 'coding' && selected) ||
+        profiles.find(p => p.valid && p.kind === 'agent' && p.mode === 'coding');
+      if (!coding) { showError('Select or create a coding profile to continue this task.'); return; }
+      if (!selected || selected.name !== coding.name) {
+        selectRun(coding.name); resetModelSelect(); if (onChange) onChange();
+      }
+      const git = result.git_workspace;
+      el('workspace-input').value = git.repository;
+      el('task-mode').value = 'continue';
+      el('continue-workspace').value = git.workspace_id || git.branch.replace(/^agent\//, '');
+      el('working-directory').value = result.working_directory || git.working_directory || '';
+      updateVisibility();
+      el('continue-workspace').focus();
+    }
   };
 })();

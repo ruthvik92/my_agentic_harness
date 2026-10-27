@@ -353,7 +353,7 @@ class Store:
         ref = self.blobs.put_json(request)
         with self.transaction():
             row = self.db.execute(
-                "SELECT t.record_ref,t.validated_ref,m.run_id,p.record_ref policy_ref "
+                "SELECT t.record_ref,t.validated_ref,m.run_id,m.request_ref model_request_ref,p.record_ref policy_ref "
                 "FROM tool_calls t JOIN model_requests m ON m.id=t.request_id "
                 "JOIN policy_decisions p ON p.call_id=t.id "
                 "WHERE t.id=? AND p.id=?",
@@ -365,10 +365,17 @@ class Store:
             call = ToolCall.model_validate_json(self.blobs.read(row["record_ref"]))
             normalized = self.blobs.json(row["validated_ref"])
             from local_agent.tools.registry import normalize
+            from local_agent.workspace.options import task_arguments
+
+            manifest = self.blobs.json(self.run(run_id)["manifest_ref"])
+            config = self.blobs.json(manifest["config_ref"])
+            provider = self.blobs.json(row["model_request_ref"])["provider"]
+            arguments = task_arguments(call.name, self.blobs.json(call.arguments_ref),
+                                       config.get("working_directory", ".") if provider != "harness" else ".")
 
             if normalized != normalize(
                 call.name,
-                self.blobs.json(call.arguments_ref),
+                arguments,
                 version=call.tool_version,
                 legacy_evidence="evidence_ref" in normalized["arguments"],
             ):

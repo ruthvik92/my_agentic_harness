@@ -128,7 +128,25 @@
             <div class="form-group" id="workspace-fields">
               <label for="workspace-input">Source workspace (host path under an allowed root)</label>
               <input id="workspace-input" type="text" placeholder="/allowed/roots/workspace">
-              <p class="model-run">For a Git repository root, coding creates a new agent branch and worktree from committed HEAD. Pending edits are excluded and preserved here. Other folders use an isolated copy. Results show the branch, starting commit, worktree and diff; merging is explicit. Circuit mode requires a PDF.</p>
+              <p class="model-run">Select the repository root. New coding tasks use a separate agent branch and worktree; source edits stay untouched. Continue reuses an existing agent worktree, including pending edits. Other folders use an isolated copy. Review and merge explicitly.</p>
+              <div class="form-group" id="coding-fields" hidden>
+                <label for="task-mode">Coding task</label>
+                <select id="task-mode">
+                  <option value="new">New task</option>
+                  <option value="continue">Continue task</option>
+                </select>
+                <div id="new-task-fields">
+                  <label for="base-ref">Starting revision (optional)</label>
+                  <input id="base-ref" type="text" placeholder="Current branch HEAD, or a branch / commit">
+                </div>
+                <div id="continue-task-fields" hidden>
+                  <label for="continue-workspace">Previous agent workspace ID</label>
+                  <input id="continue-workspace" type="text" placeholder="ws_49ba0cbff96f4ad58d70bee1a7996d2b">
+                </div>
+                <label for="working-directory">Working subdirectory (relative to repository root)</label>
+                <input id="working-directory" type="text" placeholder="tests/fixtures/broken_repo">
+                <p class="model-run">Blank uses the repository root for a new task, or the previous task directory when continuing. This focuses the agent; it does not restrict file access.</p>
+              </div>
               <div class="form-group" id="circuit-fields">
                 <label for="pdf-input">Circuit PDF (relative path)</label>
                 <input id="pdf-input" type="text" placeholder="relative/path/to/schematic.pdf">

@@ -76,6 +76,10 @@ async def run_browser(store, config, request, sandbox, provider=None):
             if key in request
         }
         kwargs["request"] = request_subset
+        if mode == "coding":
+            from local_agent.workspace.options import FIELDS
+
+            kwargs["workspace_options"] = {key: request[key] for key in FIELDS if key in request}
         task = request.get("question")
 
     with contextlib.ExitStack() as stack:

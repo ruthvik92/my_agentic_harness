@@ -13,9 +13,11 @@ from local_agent.mobile import image_mime
 from local_agent.mobile.browser_requests import validate_browser_request
 from local_agent.mobile.models import Models
 from local_agent.storage.blobs import canonical, digest
+from local_agent.workspace.options import FIELDS
 
 _ALLOWED_FIELDS = frozenset(
     {
+        *FIELDS,
         "question",
         "image",
         "model_id",
@@ -144,7 +146,7 @@ def submit_profile_turn(server, thread_id, payload):
             "question": payload.get("question"),
             "history": history,
         }
-        for field in ("workspace", "pdf", "page", "dpi", "region", "context_page"):
+        for field in ("workspace", "pdf", "page", "dpi", "region", "context_page", *FIELDS):
             if field in payload:
                 request[field] = payload[field]
         if image:

@@ -66,8 +66,10 @@ The browser configuration editor accepts this block as well. Changes affect
 future runs; recovery uses the original frozen configuration. Persistent mode is
 opt-in for coding until its behavior has been evaluated on your tasks.
 
-Each new agent run still imports a new workspace; resuming a run retains its
-workspace. The execution manager can reuse the same workspace across run IDs.
+New tasks import a new workspace. Git task continuation reuses the previous
+worktree and files with a fresh run ID, stopping any retained keeper first.
+Resuming an interrupted run retains its workspace and recovery semantics.
+The execution manager can reuse the same workspace across run IDs.
 Workspace locks serialize commands and cleanup; different workspaces never share
 keepers. The existing one-coding-run-per-data-root lease remains in effect.
 Trusted bootstrap, diff export, and verification work use ephemeral containers.

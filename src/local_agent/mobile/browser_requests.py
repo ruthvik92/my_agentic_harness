@@ -11,8 +11,10 @@ import os
 from pathlib import Path
 
 from local_agent.mobile import validate_request
+from local_agent.workspace.options import FIELDS, validate_options
 
 ALLOWED_FIELDS = {
+    *FIELDS,
     "question",
     "history",
     "image",
@@ -189,7 +191,7 @@ def validate_browser_request(value, config, allowed_roots):
     basic = validate_request(basic_subset)
 
     if mode == "chat":
-        for field in {"workspace"} | PDF_FIELDS:
+        for field in {"workspace", *FIELDS} | PDF_FIELDS:
             if field in value:
                 raise ValueError(f"chat mode does not accept field: {field}")
         return {"mode": mode, **basic}
@@ -205,9 +207,12 @@ def validate_browser_request(value, config, allowed_roots):
             "mode": mode,
             **basic,
             "workspace": str(workspace_resolved),
+            **validate_options({key: value[key] for key in FIELDS if key in value}),
         }
 
     # Circuit mode: reject image, require PDF workflow.
+    if any(key in value for key in FIELDS):
+        raise ValueError("Workspace task options require coding mode")
     if "image" in value:
         raise ValueError(
             "circuit mode does not accept image; use the PDF workflow instead"

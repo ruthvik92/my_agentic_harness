@@ -196,6 +196,8 @@ class BrowserServer(ThreadingHTTPServer):
                     "diff_ref",
                     "git_workspace",
                     "execution_mode",
+                    "working_directory",
+                    "task_mode",
                 ):
                     if field in job:
                         frozen_fields[field] = job[field]
@@ -350,7 +352,8 @@ class BrowserServer(ThreadingHTTPServer):
             if not job or job.get("thread_id") != thread_id or job.get("mode") != "coding":
                 continue
             for field in (
-                "mode", "workspace", "source_workspace", "diff_ref", "git_workspace", "execution_mode"
+                "mode", "workspace", "source_workspace", "diff_ref", "git_workspace", "execution_mode",
+                "working_directory", "task_mode",
             ):
                 if field in job:
                     message[field] = job[field]

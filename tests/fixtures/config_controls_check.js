@@ -8,6 +8,7 @@ class Element {
   get options() { return this.children; }
   appendChild(node) { this.children.push(node); }
   addEventListener(event, fn) { this.handlers[event] = fn; }
+  focus() {}
 }
 const nodes = {};
 globalThis.document = {getElementById: id => (nodes[id] ||= new Element())};
@@ -31,6 +32,15 @@ async function main() {
   await controls.refresh('coder.yaml', ['/repo']);
   check(node('legacy-circuit-controls').hidden && node('netlist-btn').hidden && node('verify-btn').hidden, 'coder must hide legacy circuit actions/models');
   check(!node('execution-fields').hidden, 'coder must show execution selector');
+  check(!node('coding-fields').hidden, 'coder must show task controls');
+  node('base-ref').value = 'topic~1'; node('working-directory').value = 'tests/fixtures/broken_repo';
+  check(controls.requestFields().base_ref === 'topic~1', 'new task must submit selected revision');
+  check(controls.requestFields().working_directory === 'tests/fixtures/broken_repo', 'must submit working directory');
+  node('task-mode').value = 'continue'; node('task-mode').handlers.change();
+  check(node('new-task-fields').hidden && !node('continue-task-fields').hidden, 'continue must show previous ID instead of revision');
+  node('continue-workspace').value = 'ws_' + 'a'.repeat(32);
+  check(controls.requestFields().continue_workspace_id === node('continue-workspace').value, 'continue must submit previous ID');
+  check(!('base_ref' in controls.requestFields()), 'stale starting revision must not leak into continuation');
   check(node('execution-mode').options[0].textContent.includes('ephemeral'), 'must show actual profile default');
   check(!('execution_mode' in controls.requestFields()), 'default must not override profile');
   node('execution-mode').value = 'persistent';
@@ -42,13 +52,20 @@ async function main() {
   check(node('execution-mode').value === '', 'profile switch must clear previous override');
   check(node('execution-mode').options[0].textContent.includes('persistent'), 'analog default must be reflected');
   check(!node('circuit-fields').hidden && node('image-fields').hidden, 'analog must show PDF input');
+  check(node('coding-fields').hidden, 'analog must hide coding fields');
   node('pdf-input').value = 'manual.pdf'; node('page-input').value = '1'; node('dpi-input').value = '300';
   check(!('execution_mode' in controls.requestFields()), 'profile persistent default must remain implicit');
+  check(!('working_directory' in controls.requestFields()), 'stale coding options must not leak into circuit requests');
   node('config-select').value = 'browser.yaml'; node('config-select').handlers.change();
   check(!node('legacy-circuit-controls').hidden, 'screenshot chat keeps its legacy optional actions');
   check(node('execution-fields').hidden, 'no-tools chat must hide execution choice');
   node('execution-mode').value = 'persistent';
   check(!('execution_mode' in controls.requestFields()), 'hidden stale execution choice must not leak into chat');
+  controls.continueTask({profile_name:'coder.yaml', working_directory:'nested',
+    git_workspace:{repository:'/repo', workspace_id:'ws_' + 'b'.repeat(32)}});
+  check(controls.mode() === 'coding', 'continue result action must select a coding profile');
+  check(controls.requestFields().working_directory === 'nested', 'continue action must restore previous directory');
+  check(controls.requestFields().continue_workspace_id === 'ws_' + 'b'.repeat(32), 'continue action must restore workspace ID');
   node('config-select').value = 'coder.yaml'; node('config-select').handlers.change();
   check(node('execution-mode').value === '', 'returning to coder must use its default');
   print('Profile visibility and execution mode checks passed');

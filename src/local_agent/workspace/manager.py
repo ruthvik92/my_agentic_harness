@@ -82,9 +82,11 @@ class Workspaces:
         )
         return workspace_id, root
 
-    def create_coding(self, source: Path, run_id: str) -> tuple[str, Path]:
+    def create_coding(self, source: Path, run_id: str, *, base_ref="HEAD") -> tuple[str, Path]:
         source = source.resolve(strict=True)
         if not (source / ".git").exists():
+            if base_ref != "HEAD":
+                raise ValueError("Selecting a starting revision requires a Git repository root")
             return self.create(source)
         if self.root.resolve().is_relative_to(source):
             raise ValueError("data root must be outside the imported repository")
@@ -95,7 +97,7 @@ class Workspaces:
             private_directory(root / name)
         from local_agent.workspace.git import GitWorktrees
 
-        GitWorktrees(self).prepare(source, workspace_id, run_id)
+        GitWorktrees(self).prepare(source, workspace_id, run_id, base_ref=base_ref)
         return workspace_id, root
 
     def git_info(self, workspace_id):

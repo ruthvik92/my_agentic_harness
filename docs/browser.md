@@ -107,8 +107,8 @@ in the job's config and used again on recovery. Analog profiles support the
 same selector; profiles without tools hide it.
 
 Persistence preserves container state such as `/tmp` during the task. Shell
-commands remain separate processes, and a new task gets a new workspace and
-container. Project files remain available in either execution mode. Saved chat
+commands remain separate processes. **New task** creates a new workspace;
+**Continue task** reuses workspace files with a fresh container. Saved chat
 history is independent of container persistence. Resource and idle limits still
 apply; see [execution lifecycle](executor.md).
 
@@ -116,10 +116,18 @@ apply; see [execution lifecycle](executor.md).
 
 Coder profiles require an explicit host workspace under the allowed roots
 (default launch cwd is the harness checkout). A Git repository root gets a new
-`agent/ws_<id>` branch and linked host worktree from committed `HEAD`; pending
+`agent/ws_<id>` branch and linked host worktree from current `HEAD` or a selected
+starting revision; pending
 source edits are excluded and preserved. Other directories use an isolated copy.
 The candidate is bind-mounted into Docker for tools. Review and merge remain
 explicit. See [Git workspaces](git-workspaces.md) for provenance and merge commands.
+
+Choose **New task** or **Continue task** in the coding controls. Continue takes
+the previous workspace ID; **Continue this worktree** on a result fills that in.
+Set **Working subdirectory** separately from the source repository path, for
+example `tests/fixtures/broken_repo`. Blank uses the root for new tasks or retains
+the prior directory for continuation. Enter `.` to select the root explicitly.
+Continuation retains pending edits and the agent branch, with a fresh run ID.
 
 Each coding reply shows **Edited workspace**, including the edited project path
 on the harness computer and a **Copy path** button. The source folder is shown

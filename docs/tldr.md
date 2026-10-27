@@ -16,7 +16,9 @@ Docker socket, 4 CPU cores, 4 GiB memory and 128 processes. The model server can
 use your host GPU; tool containers cannot.
 
 For coding against a Git repository root, `project` is a linked host worktree
-on a new `agent/ws_<id>` branch, starting from committed `HEAD`. Other folders
+on an `agent/ws_<id>` branch, starting from current `HEAD` or a selected commit.
+**Continue task** reuses the previous worktree and pending changes; a separate
+**Working subdirectory** focuses the agent within the repository. Other folders
 use a copied project. Other workspace roots are `memory`, `tools`, `scratch`
 and `outputs`. Your current checkout and pending edits stay untouched. The host
 publishes a candidate commit and retains a protected final diff; review and
@@ -97,7 +99,8 @@ uv run --locked local-agent replay RUN_ID --recorded-only
 Trace shows recorded history; audit checks evidence and authorization bindings;
 report shows outcomes, latency, tokens and failures. Recorded replay feeds saved
 provider/tool results through state checks without inference or real tools.
-A fresh `run` is a separate operation with a new workspace and ID.
+A fresh `run` gets a new ID. It creates a new workspace unless explicitly given
+`--continue-workspace ws_<id>` to continue a managed Git candidate.
 
 ## 5. Understand success and recovery
 

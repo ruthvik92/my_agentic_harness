@@ -178,7 +178,9 @@ async def restore(agent, run_id):
 
         worktrees = GitWorktrees(agent.workspaces)
         worktrees.verify(worktrees.load(agent.workspace_id))
-    agent.baseline = store.control / "baselines" / agent.workspace_id
+    agent.baseline = store.control / "baselines" / config.get("baseline_id", agent.workspace_id)
+    agent.workspace_options = config.get("workspace_options", {})
+    agent.working_directory = config.get("working_directory", ".")
     agent.created = True
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(run["created_utc"])).total_seconds()
     import time

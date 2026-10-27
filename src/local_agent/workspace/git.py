@@ -16,6 +16,7 @@ MAX_FILES = 100000
 PUBLIC_FIELDS = (
     "repository", "base_branch", "base_commit", "branch", "worktree",
     "candidate_commit", "source_dirty", "state",
+    "workspace_id", "run_id", "working_directory", "task_mode", "selected_ref",
 )
 
 
@@ -101,7 +102,7 @@ class GitWorktrees:
         record = self.load(workspace_id)
         return {key: record.get(key) for key in PUBLIC_FIELDS} if record else None
 
-    def prepare(self, source, workspace_id, run_id):
+    def prepare(self, source, workspace_id, run_id, *, base_ref="HEAD"):
         source = source.resolve(strict=True)
         # Selecting a subdirectory of a Git repo must not unexpectedly import the entire repo.
         if not (source / ".git").exists():
@@ -109,7 +110,10 @@ class GitWorktrees:
         top = Path(os.fsdecode(git("-C", source, "rev-parse", "--show-toplevel")).strip()).resolve()
         if top != source:
             raise ValueError("Select the Git repository root for worktree execution")
-        base = git("-C", source, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+        if not isinstance(base_ref, str) or not base_ref or "\x00" in base_ref:
+            raise ValueError("Starting revision must be a non-empty Git ref or commit")
+        base = git("-C", source, "rev-parse", "--verify", "--end-of-options",
+                   base_ref + "^{commit}").decode().strip()
         branch = git("-C", source, "rev-parse", "--abbrev-ref", "HEAD").decode().strip()
         entries = git("-C", source, "ls-tree", "-r", "-l", "-z", "--full-tree", base).split(b"\0")
         from local_agent.workspace.manager import IMPORT_EXCLUDES
@@ -131,10 +135,14 @@ class GitWorktrees:
         # git status/diff against working files can invoke clean filters. Compare literal
         # bytes instead, and use Git only to enumerate staged/untracked paths.
         dirty = bool(git("-C", source, "diff", "--cached", "--name-only", "--no-ext-diff",
-                         "--no-textconv", base, "--")) or bool(
+                         "--no-textconv", "HEAD", "--")) or bool(
             git("-C", source, "ls-files", "--others", "--exclude-standard", "-z")
         )
-        for path, mode, oid in files:
+        source_entries = git("-C", source, "ls-tree", "-r", "-z", "HEAD").split(b"\0")
+        for entry in filter(None, source_entries):
+            header, name = entry.split(b"\t", 1)
+            mode, kind, oid = header.split()
+            path = Path(os.fsdecode(name))
             try:
                 data, info = read_literal(source, path, MAX_BYTES)
                 hashed = hashlib.new("sha1" if len(oid) == 40 else "sha256")
@@ -150,6 +158,7 @@ class GitWorktrees:
             "base_commit": base, "branch": "agent/" + workspace_id,
             "worktree": str(project), "candidate_commit": None, "source_dirty": dirty,
             "state": "preparing",
+            "selected_ref": base_ref, "task_mode": "new", "working_directory": ".",
         }
         self.save(record)
         try:
@@ -185,6 +194,47 @@ class GitWorktrees:
         head = command(record, "rev-parse", "refs/heads/" + record["branch"]).decode().strip()
         if head not in {record["base_commit"], record.get("candidate_commit")}:
             raise RuntimeError("Agent branch moved outside the harness; inspect before continuing")
+
+    def continue_task(self, workspace_id, source, run_id, *, working_directory=None):
+        """Reassign a managed candidate without touching any working files."""
+        record = self.load(workspace_id)
+        if not record or Path(record["repository"]).resolve() != source.resolve(strict=True):
+            raise ValueError("Continue requires a managed Git workspace from the selected repository")
+        if record["state"] not in {"editing", "ready_for_review"}:
+            raise ValueError("Git workspace requires recovery before starting a continued task")
+        self.verify(record)
+        record.update(
+            base_commit=record.get("candidate_commit") or record["base_commit"],
+            candidate_commit=None, run_id=run_id, state="editing", task_mode="continue",
+            working_directory=working_directory or record.get("working_directory", "."),
+        )
+        record.pop("candidate_tree", None)
+        self.save(record)
+        return record
+
+    def baseline(self, workspace_id, target):
+        """Materialize the committed parent for an immutable per-run diff baseline."""
+        record = self.load(workspace_id)
+        self.verify(record)
+        entries = command(record, "ls-tree", "-r", "-l", "-z", record["base_commit"]).split(b"\0")
+        if len(entries) - 1 > MAX_FILES:
+            raise ValueError("Git baseline has too many files")
+        target.mkdir(parents=True, mode=0o700)
+        total = 0
+        for entry in filter(None, entries):
+            header, name = entry.split(b"\t", 1)
+            mode, kind, oid, size = header.split()
+            path = Path(name.decode("utf-8"))
+            total += int(size)
+            if (mode not in {b"100644", b"100755"} or kind != b"blob"
+                    or path.is_absolute() or any(p in {"..", ".git"} for p in path.parts)
+                    or total > MAX_BYTES):
+                raise ValueError("Unsupported Git baseline")
+            destination = target / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("xb") as stream:
+                stream.write(command(record, "cat-file", "blob", oid.decode()))
+            destination.chmod(0o700 if mode == b"100755" else 0o600)
 
     def finalize(self, workspace_id, snapshot):
         """Publish an already captured candidate, using a private index and literal blob writes."""
