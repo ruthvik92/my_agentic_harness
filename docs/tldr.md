@@ -144,7 +144,7 @@ are in [Progress.md](../Progress.md).
 
 ## Analog schematic PDFs
 
-Use `uv run local-agent circuit --case circuit-case --pdf schematics/nak_Dragon_Service_Manual_hi_res.pdf --page 45 --context-page 46 --question "Explain this schematic"`.
+Use `uv run local-agent circuit --case "$HOME/local-agent-cases/circuit-case" --pdf schematics/nak_Dragon_Service_Manual_hi_res.pdf --page 45 --context-page 46 --question "Explain this schematic"`.
 The circuit agent renders full-page and high-resolution detail images, analyzes
 them with the separately configured vision model, and saves an explanation,
 component graph and conservative draft SPICE netlist. Outputs are copied into

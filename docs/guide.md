@@ -1,7 +1,7 @@
 # Detailed implementation guide
 
 This document describes the implemented harness. The original
-[build guide](../local-agent-build-guide.md) explains the design and milestones;
+[build guide](history/local-agent-build-guide.md) explains the design and milestones;
 [the five-minute guide](tldr.md) provides the short operational introduction.
 
 ## Architecture and the execution loop

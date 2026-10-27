@@ -1,6 +1,6 @@
 # Local agent harness
 
-A sequential local coding agent built from [the guide](local-agent-build-guide.md).
+A sequential local coding agent built from [the guide](docs/history/local-agent-build-guide.md).
 Native Ollama or an OpenAI-compatible Chat Completions API performs inference. All generated commands, edits and helpers
 run in non-root, offline Docker containers. SQLite and immutable blobs retain
 inputs, decisions, execution outcomes and restart evidence.

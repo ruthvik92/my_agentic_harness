@@ -1,1 +1,0 @@
-Add versioned tool workflows while preserving old instruction strings. All implementation authorship belongs local-agent; scope only config.py and circuits/instructions.py. Supervisor tests imports later.

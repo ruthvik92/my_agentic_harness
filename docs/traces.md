@@ -240,4 +240,4 @@ uv run --locked local-agent --data-root /path/to/data-root trace-web --port 8765
 `--port` and other viewer flags keep their usual positions.
 
 For a worked circuit example with real event numbers, see the
-[Dragon run walkthrough](../circuit-case/analysis/run_58a01c1e24dc4cd880f55fc5e5ec2b74/README.md).
+[Dragon run walkthrough](repository-layout.md#existing-local-investigation).

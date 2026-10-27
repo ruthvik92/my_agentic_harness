@@ -6,6 +6,11 @@ from local_agent.contracts import new_id
 from local_agent.storage.blobs import private_directory
 
 MAX_IMPORT_BYTES = 256 * 1024 * 1024
+IMPORT_EXCLUDES = frozenset({
+    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
+    ".tool-build", ".browser-build", ".config-cleanup", ".config-consolidation",
+    ".executor-review", ".executor-fixes",
+})
 
 
 def copy_tree(source: Path, target: Path, *, exclude=(), budget=MAX_IMPORT_BYTES):
@@ -58,14 +63,7 @@ class Workspaces:
         copy_tree(
             source,
             root / "project",
-            exclude=(
-                ".git",
-                ".venv",
-                "__pycache__",
-                ".pytest_cache",
-                ".tool-build",
-                ".browser-build",
-            ),
+            exclude=IMPORT_EXCLUDES,
         )
         return workspace_id, root
 

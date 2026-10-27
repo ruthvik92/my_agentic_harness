@@ -29,7 +29,7 @@ from local_agent.runtime.tool_results import result_preview
 from local_agent.storage.blobs import canonical, digest, private_directory
 from local_agent.storage.database import AuditUnavailable
 from local_agent.tools.registry import VERSIONS, normalize
-from local_agent.workspace.manager import Workspaces, copy_tree
+from local_agent.workspace.manager import IMPORT_EXCLUDES, Workspaces, copy_tree
 
 BOOTSTRAP = """import subprocess
 for argv in [['git','init'],['git','add','.'],['git','-c','user.name=Local Agent','-c',
@@ -531,14 +531,7 @@ class Agent:
                     copy_tree(
                         source,
                         self.baseline,
-                        exclude=(
-                            ".git",
-                            ".venv",
-                            ".pytest_cache",
-                            "__pycache__",
-                            ".tool-build",
-                            ".browser-build",
-                        ),
+                        exclude=IMPORT_EXCLUDES,
                     )
                     config_ref = self.store.blobs.put_json(
                         {

@@ -1,9 +1,0 @@
-*
-!sandbox
-!sandbox/Dockerfile
-!sandbox/verify.py
-!sandbox/pdf_extract.py
-!src
-!src/local_agent
-!src/local_agent/executor
-!src/local_agent/executor/worker.py

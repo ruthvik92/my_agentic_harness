@@ -1,1 +1,0 @@
-Create tests/test_image_runtime.py. config/coder.yaml is supplied for signature reference; all runtime dependencies supplied when supervisor assembles harness. Do not search host folders or execute tests/imports inside author sandbox. Write test then py_compile only.

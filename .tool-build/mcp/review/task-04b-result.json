@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\n  \"run_id\": \"run_b20302fa71764bf89bd0447a9b376117\",\n  \"status\": \"completed_unverified\",\n  \"answer\": \"Done. Changed the `parent_fd` call in `write_registration` from `_REL_PATH` to `_REL_PATH + \\\"/\\\" + name + \\\".json\\\"`, so the fd now refers to `tools/.registry` (the parent of the file). `py_compile` passes.\",\n  \"workspace\": \"/home/ruthvik/.local/share/local-agent-mcp/sandboxes/ws_b014944de879496b900e119982b75997\",\n  \"diff_ref\": \"blob://615d532a0a0980e7196a45372471822b4c980e66a9301ec438438cbf42bd170f\",\n  \"capability_probe\": {\n    \"checks\": [\n      \"valid_tool_selection\",\n      \"schema_adherence\",\n      \"tool_result_continuation\",\n      \"sensible_stop\"\n    ],\n    \"key\": \"75448305b6bad9147a835d09d88a5f8f10f39bcc169dc6e7e0b574067cc2acd8\",\n    \"model\": \"qwen3.8:27b\",\n    \"passed\": true,\n    \"run_id\": \"run_0500ab0347cf4707a60a801268e0152c\"\n  },\n  \"audit\": {\n    \"run_id\": \"run_b20302fa71764bf89bd0447a9b376117\",\n    \"ok\": true,\n    \"errors\": [],\n    \"events\": 59,\n    \"checked_blobs\": 95,\n    \"event_counts\": {\n      \"run.created\": 1,\n      \"run.started\": 1,\n      \"model.selected\": 1,\n      \"context.built\": 6,\n      \"model.requested\": 6,\n      \"model.responded\": 6,\n      \"tool.proposed\": 5,\n      \"tool.validated\": 5,\n      \"policy.evaluated\": 5,\n      \"execution.dispatch_intent\": 5,\n      \"execution.started\": 5,\n      \"execution.finished\": 5,\n      \"checkpoint.committed\": 4,\n      \"completion.proposed\": 1,\n      \"workspace.prepared\": 1,\n      \"artifact.registered\": 1,\n      \"run.stopped\": 1\n    }\n  },\n  \"provider\": \"ollama\",\n  \"model\": \"qwen3.8:27b\",\n  \"exit_code\": 0\n}"
-    }
-  ],
-  "isError": false
-}

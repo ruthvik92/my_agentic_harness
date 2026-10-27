@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\n  \"run_id\": \"run_9ab322d9f8154dd4b8fe01383e2649df\",\n  \"status\": \"completed_unverified\",\n  \"answer\": \"Done. Edited `config/coder.yaml` only:\\n- `window_tokens`: 8192 → 65536\\n- `output_reserve_tokens`: 2048 → 8192\\n\\nAll other values preserved, no new fields added. Verified via Python text assertion — printed `CONFIG_OK`.\",\n  \"workspace\": \"/home/ruthvik/.local/share/local-agent-mcp/sandboxes/ws_43222a2acc1547079f219c2a091357d9\",\n  \"diff_ref\": \"blob://9bdbd76ded8cf0a70b02e15760b94e2ce557001060fd36972308696b8cffb70c\",\n  \"capability_probe\": {\n    \"checks\": [\n      \"valid_tool_selection\",\n      \"schema_adherence\",\n      \"tool_result_continuation\",\n      \"sensible_stop\"\n    ],\n    \"key\": \"11e6e10d58b2738b305de0b3ff99c0ce03a31bfe2d8c945e281e5d07bd09657c\",\n    \"model\": \"qwen3.8:27b\",\n    \"passed\": true,\n    \"run_id\": \"run_c201fd62945f4318ba7f3472fa1d28ca\"\n  },\n  \"audit\": {\n    \"run_id\": \"run_9ab322d9f8154dd4b8fe01383e2649df\",\n    \"ok\": true,\n    \"errors\": [],\n    \"events\": 59,\n    \"checked_blobs\": 96,\n    \"event_counts\": {\n      \"run.created\": 1,\n      \"run.started\": 1,\n      \"model.selected\": 1,\n      \"context.built\": 6,\n      \"model.requested\": 6,\n      \"model.responded\": 6,\n      \"tool.proposed\": 5,\n      \"tool.validated\": 5,\n      \"policy.evaluated\": 5,\n      \"execution.dispatch_intent\": 5,\n      \"execution.started\": 5,\n      \"execution.finished\": 5,\n      \"checkpoint.committed\": 4,\n      \"completion.proposed\": 1,\n      \"workspace.prepared\": 1,\n      \"artifact.registered\": 1,\n      \"run.stopped\": 1\n    }\n  },\n  \"provider\": \"ollama\",\n  \"model\": \"qwen3.8:27b\",\n  \"exit_code\": 0\n}"
-    }
-  ],
-  "isError": false
-}

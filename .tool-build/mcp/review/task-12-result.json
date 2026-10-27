@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\n  \"run_id\": \"run_2cc4cf7d9a0640a1b7b9798b2777744d\",\n  \"status\": \"completed_unverified\",\n  \"answer\": \"Added `render_pdf_region` and `view_image` branches to `operate()` in `src/local_agent/executor/worker.py`, following the existing `register_tool`/`execute_tool` pattern (TRUSTED path insertion, lazy import, return of the helper call). `py_compile` passes.\",\n  \"workspace\": \"/home/ruthvik/.local/share/local-agent-mcp/sandboxes/ws_c2a01745861f4490b4b2dbbdf7fd9dfe\",\n  \"diff_ref\": \"blob://5590471e19ca4af0540f6c4c08deea4af30cd78e7aeea92d2283003a229f54ae\",\n  \"capability_probe\": {\n    \"checks\": [\n      \"valid_tool_selection\",\n      \"schema_adherence\",\n      \"tool_result_continuation\",\n      \"sensible_stop\"\n    ],\n    \"key\": \"eac6689cf2f5ed7026c7de10f443a3ab30060b7a1bb26e55184f5ae363dd3d1e\",\n    \"model\": \"qwen3.8:27b\",\n    \"passed\": true,\n    \"run_id\": \"run_0db4781bae134fc7a84075b6aa0fa3b2\"\n  },\n  \"audit\": {\n    \"run_id\": \"run_2cc4cf7d9a0640a1b7b9798b2777744d\",\n    \"ok\": true,\n    \"errors\": [],\n    \"events\": 69,\n    \"checked_blobs\": 111,\n    \"event_counts\": {\n      \"run.created\": 1,\n      \"run.started\": 1,\n      \"model.selected\": 1,\n      \"context.built\": 7,\n      \"model.requested\": 7,\n      \"model.responded\": 7,\n      \"tool.proposed\": 6,\n      \"tool.validated\": 6,\n      \"policy.evaluated\": 6,\n      \"execution.dispatch_intent\": 6,\n      \"execution.started\": 6,\n      \"execution.finished\": 6,\n      \"checkpoint.committed\": 5,\n      \"completion.proposed\": 1,\n      \"workspace.prepared\": 1,\n      \"artifact.registered\": 1,\n      \"run.stopped\": 1\n    }\n  },\n  \"provider\": \"ollama\",\n  \"model\": \"qwen3.8:27b\",\n  \"exit_code\": 0\n}"
-    }
-  ],
-  "isError": false
-}

@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local development snapshots and investigation data belong outside this checkout.
+/.browser-build/
+/.tool-build/
+/.config-cleanup/
+/.config-consolidation/
+/.executor-review/
+/.executor-fixes/
+/circuit-case/
+/config/.profiles.lock

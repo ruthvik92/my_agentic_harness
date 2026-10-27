@@ -35,7 +35,7 @@ no network listener, no OAuth flow. No paid verifier or OpenAI key is forwarded.
 - `harness_circuit(case, pdf, page, question, region=None, model=None)` — PDF relative to
   an allowed case, no parent traversal; page 1-based; `region [x0,y0,x1,y1]` normalized,
   top-left origin; `config/analog.yaml` vision+tools; writes analysis/netlists/draft
-  exports into the case. Example: case `/home/ruthvik/my_agentic_harness/circuit-case`,
+  exports into the case. Example: case `/home/ruthvik/local-agent-cases/circuit-case`,
   pdf `schematics/nak_Dragon_Service_Manual_hi_res.pdf`, page 44, region `[0,0.5,0.5,1]`.
   No guaranteed correct/simulatable netlist.
 

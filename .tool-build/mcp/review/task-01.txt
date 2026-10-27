@@ -1,5 +1,0 @@
-Task 01: Create custom_schema.py with stdlib primitive schema/argument validators.
-Scope: one new module, <=80 lines. Required and undeclared fields, strict primitive
-types, finite numbers, supported schema keys, 64KiB serialized argument bound.
-Python compile and direct smoke assertions; separate regression tests later.
-Model explicitly selected: qwen3.8:27b. Invoked using actual harness_run_code MCP.

@@ -86,3 +86,20 @@ def test_workspace_copy_rejects_links(tmp_path):
     (source / "link").symlink_to("a")
     with pytest.raises(ValueError, match="symlinks"):
         manager.create(source)
+
+
+def test_workspace_copy_excludes_archives_and_caches_without_touching_originals(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "main.py").write_text("print('project')\n")
+    for name in (
+        ".browser-build", ".tool-build", ".config-cleanup", ".config-consolidation",
+        ".executor-review", ".executor-fixes", ".ruff_cache",
+    ):
+        (source / name).mkdir()
+        (source / name / "outside").symlink_to(tmp_path / "nonexistent")
+    manager = Workspaces(tmp_path / "data")
+    _, path = manager.create(source)
+    assert sorted(p.name for p in (path / "project").iterdir()) == ["main.py"]
+    assert (path / "project/main.py").read_text() == "print('project')\n"
+    assert (source / ".executor-review/outside").is_symlink()

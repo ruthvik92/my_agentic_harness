@@ -7,7 +7,7 @@ existing Docker-backed runtime. The original manual and symptoms stay in place.
 ```bash
 uv run local-agent build-sandbox
 uv run local-agent circuit \
-  --case circuit-case \
+  --case "$HOME/local-agent-cases/circuit-case" \
   --pdf schematics/nak_Dragon_Service_Manual_hi_res.pdf \
   --page 45 --context-page 46 \
   --question "Explain the auto azimuth circuit and create a partial netlist."
