@@ -7,7 +7,7 @@ argument, read the tool result, and stop sensibly.
 
 ## Why a real tool round-trip
 
-The probe runs one bounded agent turn that:
+The probe runs a bounded agent run (up to 3 model turns) that:
 
 1. Calls `read_file` with path `project/probe.txt`.
 2. Reads the tool result.
@@ -30,12 +30,15 @@ Probes are bounded to prevent runaway cost or time:
 
 The probe result is cached by exact deployment inputs (provider, model,
 endpoint, image, schemas, instructions, context and output limits). A cache hit
-avoids another probe agent invocation.
+avoids another probe agent invocation; the metadata is still queried to compute
+the cache key, but no new inference run is started on a hit.
 
 ## Separate workspace
 
 Probes use their own workspace (`probe_sources/<id>`) containing only
-`probe.txt`. They do not touch the game workspace or any production files.
+`probe.txt`. This is the input fixture only; the actual retained workspace is
+`<data-root>/sandboxes/ws.../project`. They do not touch the game workspace or
+any production files.
 
 ## Ephemeral execution
 
@@ -71,13 +74,14 @@ docker ps -a --filter label=local-agent.role=capability-probe
 ## Retained traces vs removed containers
 
 Probe containers are removed after completion. Their durable traces (SQLite
-events, immutable blobs, workspace files) are retained for audit. Older
+events, immutable blobs, workspace files) are retained for audit; the retained
+workspace and traces are not deleted, only the containers are. Older
 persistent probe keepers (from before ephemeral enforcement) idle-expire
 through the normal lifecycle.
 
 ## Role classification
 
 The role is derived from the protected run manifest:
-`run(run_id) -> manifest_ref -> config['probe'] is True`. Missing or
-non-strict-True flags classify as a normal task. Role is diagnostic, not
-authority.
+`run(run_id) -> manifest_ref -> manifest.config_ref -> config['probe'] is True`.
+Missing or non-strict-True flags classify as a normal task. Role is diagnostic,
+not authority.

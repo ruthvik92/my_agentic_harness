@@ -33,9 +33,13 @@ def ephemeral_container_names(role, owner, execution_id):
     find containers created before the probe naming scheme existed. Normal task
     ephemeral containers keep the existing ``local-agent-<execution_id>`` name
     only (no duplicate).
+
+    The pair may coincide for normal tasks (current == legacy); callers must
+    deduplicate equal names before probing. The API stays a pair because the
+    release path unpacks it.
     """
     if role == PROBE_ROLE:
-        owner_hex = "".join(ch for ch in str(owner) if ch.isalnum())[:12]
+        owner_hex = str(owner)[:12]
         current = f"local-agent-{owner_hex}-probe-{execution_id}"
     else:
         current = f"local-agent-{execution_id}"

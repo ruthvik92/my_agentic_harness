@@ -542,10 +542,12 @@ class DockerExecutor:
             "local-agent.execution": execution_id,
             "local-agent.workspace": request.workspace_id,
             "local-agent.run": run_id,
-        }.items()) or (mapping and (
-            info["Id"] != mapping["container_id"]
-            or labels.get("local-agent.owner") != manager.owner
+        }.items()) or (
+            labels.get("local-agent.owner") != manager.owner
             or labels.get("local-agent.mode") != "ephemeral"
+        ) or (mapping and (
+            info["Id"] != mapping["container_id"]
+            or labels.get("local-agent.owner") != mapping["owner"]
         )):
             raise PermissionError("ephemeral cleanup ownership mismatch")
         try:

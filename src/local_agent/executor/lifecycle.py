@@ -216,6 +216,7 @@ class ExecutionManager:
                 "create", "--name", self.container_name(workspace_id),
                 "--label", "local-agent.owner=" + self.owner,
                 "--label", "local-agent.mode=persistent",
+                "--label", "local-agent.role=task",
                 "--label", "local-agent.workspace=" + workspace_id,
                 *create_args, "--entrypoint", "python", self.image,
                 "-I", "-S", "-c", "import time; time.sleep(2147483647)",

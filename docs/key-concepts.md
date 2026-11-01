@@ -209,6 +209,12 @@ works. Chromium being present is weaker evidence than a successful click/type/
 reload/persistence self-test. A browser self-test is still separate from testing
 the project's actual user flows.
 
+Startup capability probes are a bounded agent run (up to 3 model turns) that
+verifies the selected model can drive the sandbox tool interface end to end;
+they are diagnostic, not a coding-quality verification. See
+[model capability probes](model-capability-probes.md) for the bounded limits,
+caching, workspace and container-naming details.
+
 See [environment preparation](environment-preparation.md) and
 [browser verification](browser-verification.md).
 

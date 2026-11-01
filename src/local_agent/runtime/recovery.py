@@ -32,6 +32,9 @@ async def reconcile(agent, row):
         )
     else:
         mapping = agent.executor.mapping(execution.execution_id)
+        manager = agent.executor.make_manager(
+            lambda kind, data: agent.event(kind, "recovery", data)
+        )
         if mapping:
             expected = {
                 "execution_id": execution.execution_id,
@@ -41,9 +44,6 @@ async def reconcile(agent, row):
             }
             if any(mapping.get(key) != value for key, value in expected.items()):
                 raise NeedsReconciliation("execution container mapping identity mismatch")
-            manager = agent.executor.make_manager(
-                lambda kind, data: agent.event(kind, "recovery", data)
-            )
             if mapping.get("owner") != manager.owner:
                 raise NeedsReconciliation("execution container owner mismatch")
             if mapping["execution_mode"] == "persistent":
@@ -65,11 +65,32 @@ async def reconcile(agent, row):
                 )
             if mapping["execution_mode"] != "ephemeral":
                 raise NeedsReconciliation("invalid execution mode in mapping")
-        name = mapping["container_id"] if mapping else "local-agent-" + execution.execution_id
-        try:
-            info = await agent.executor.inspect(name)
-        except RuntimeError:
+            name = mapping["container_id"]
+            try:
+                info = await agent.executor.inspect(name)
+            except RuntimeError:
+                info = None
+        else:
+            from local_agent.executor.container_identity import (
+                container_role,
+                ephemeral_container_names,
+            )
+
+            role = container_role(store, agent.run_id)
+            current, legacy = ephemeral_container_names(role, manager.owner, execution.execution_id)
+            candidates = [current]
+            if legacy != current:
+                candidates.append(legacy)
             info = None
+            for candidate in candidates:
+                try:
+                    info = await agent.executor.inspect(candidate)
+                except RuntimeError:
+                    info = None
+                if info is not None:
+                    break
+            if info is not None:
+                name = info["Id"]
         if info is not None:
             labels = info["Config"].get("Labels") or {}
             required = {

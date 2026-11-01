@@ -29,6 +29,10 @@ a new process: shell exports and `cd` do not carry over. Working directories are
 explicit workspace-relative paths; the host execution API accepts a validated
 per-call environment. Dependencies and important artifacts belong in the mounted
 workspace, for example a project virtual environment, rather than container state.
+New persistent keepers are created with a `local-agent.role=task` label; role
+labels are diagnostic metadata only and never grant authority. See
+[model capability probes](model-capability-probes.md) for the probe role and
+container naming.
 
 Add this block to an existing agent YAML (including `coder.yaml` or `analog.yaml`):
 

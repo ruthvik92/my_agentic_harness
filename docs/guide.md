@@ -144,7 +144,9 @@ Startup capability probes test real tool selection, schema adherence, result
 continuation and stopping. Cache keys include provider/model metadata, endpoint,
 image, schemas, instructions, context and output limits. Use
 `doctor --agent PATH` to check the chosen provider. Model-list access and native
-function calling are required by this initial adapter.
+function calling are required by this initial adapter. See
+[model capability probes](model-capability-probes.md) for the bounded run,
+caching, workspace and container-naming details.
 
 The implementation follows the official
 [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
