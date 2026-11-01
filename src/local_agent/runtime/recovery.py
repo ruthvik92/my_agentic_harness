@@ -103,6 +103,14 @@ async def reconcile(agent, row):
                 and (
                     info["Id"] != mapping["container_id"]
                     or labels.get("local-agent.owner") != mapping["owner"]
+                    or labels.get("local-agent.mode") != "ephemeral"
+                )
+                or (
+                    not mapping
+                    and (
+                        ("local-agent.owner" in labels and labels["local-agent.owner"] != manager.owner)
+                        or ("local-agent.mode" in labels and labels["local-agent.mode"] != "ephemeral")
+                    )
                 )
             ):
                 raise NeedsReconciliation("recovery container ownership mismatch")

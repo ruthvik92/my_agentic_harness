@@ -525,30 +525,43 @@ class DockerExecutor:
         manager = self.make_manager(emit)
         if mapping:
             name = mapping["container_id"]
+            info = await manager.inspect(name)
+            if info is None:
+                return
         else:
             role = container_role(self.store, run_id)
             current, legacy = ephemeral_container_names(role, manager.owner, execution_id)
-            info = await manager.inspect(current)
-            if info is None:
-                info = await manager.inspect(legacy)
+            candidates = [current]
+            if legacy != current:
+                candidates.append(legacy)
+            info = None
+            for candidate in candidates:
+                info = await manager.inspect(candidate)
+                if info is not None:
+                    break
             if info is None:
                 return
             name = info["Id"]
-        info = await manager.inspect(name)
-        if info is None:
-            return
         labels = info["Config"].get("Labels") or {}
         if any(labels.get(key) != value for key, value in {
             "local-agent.execution": execution_id,
             "local-agent.workspace": request.workspace_id,
             "local-agent.run": run_id,
         }.items()) or (
-            labels.get("local-agent.owner") != manager.owner
-            or labels.get("local-agent.mode") != "ephemeral"
-        ) or (mapping and (
-            info["Id"] != mapping["container_id"]
-            or labels.get("local-agent.owner") != mapping["owner"]
-        )):
+            mapping
+            and (
+                info["Id"] != mapping["container_id"]
+                or labels.get("local-agent.owner") != mapping["owner"]
+                or labels.get("local-agent.mode") != "ephemeral"
+            )
+            or (
+                not mapping
+                and (
+                    ("local-agent.owner" in labels and labels["local-agent.owner"] != manager.owner)
+                    or ("local-agent.mode" in labels and labels["local-agent.mode"] != "ephemeral")
+                )
+            )
+        ):
             raise PermissionError("ephemeral cleanup ownership mismatch")
         try:
             emit("container.stopped", {"container_id": info["Id"], "state": "STOPPED"})
