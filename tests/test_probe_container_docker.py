@@ -86,8 +86,11 @@ def _run_probe(tmp_path, image):
         assert labels.get("local-agent.role") == "capability-probe"
         assert labels.get("local-agent.mode") == "ephemeral"
         assert labels.get("local-agent.run") == agent.run_id
-        assert labels.get("local-agent.workspace") == agent.workspace_id
+        assert labels.get("local-agent.workspace") == mapping["workspace_id"]
         assert labels.get("local-agent.execution") == execution_id
+        keeper = agent.executor.keeper
+        assert keeper is not None
+        assert mapping["workspace_id"] not in keeper.records
         return await original_release(execution_id)
 
     agent.executor.release = wrapped_release
