@@ -14,6 +14,10 @@ from local_agent.contracts import (
     ExecutionSettings,
 )
 from local_agent.executor.lifecycle import ExecutionManager, publish
+from local_agent.executor.container_identity import (
+    container_role,
+    ephemeral_container_names,
+)
 from local_agent.executor.worker import validate_execution_options
 from local_agent.storage.blobs import canonical
 
@@ -188,7 +192,8 @@ class DockerExecutor:
             "ON t.id=e.call_id JOIN model_requests m ON m.id=t.request_id WHERE e.id=?",
             (request.execution_id,),
         ).fetchone()[0]
-        name = container_id or ("local-agent-" + request.execution_id)
+        role = container_role(self.store, run_id)
+        name = container_id or ephemeral_container_names(role, manager.owner, request.execution_id)[0]
         created = False
         proc = None
         started = time.monotonic()
@@ -215,6 +220,7 @@ class DockerExecutor:
                     "--label", "local-agent.run=" + run_id,
                     "--label", "local-agent.owner=" + manager.owner,
                     "--label", "local-agent.mode=ephemeral",
+                    "--label", "local-agent.role=" + role,
                     *self.create_args(workspace), self.image,
                 )
                 created = True
@@ -516,8 +522,18 @@ class DockerExecutor:
                     if info is not None:
                         manager.event("container.idle", {**record, "active_execution_id": execution_id})
             return
-        name = mapping["container_id"] if mapping else "local-agent-" + execution_id
         manager = self.make_manager(emit)
+        if mapping:
+            name = mapping["container_id"]
+        else:
+            role = container_role(self.store, run_id)
+            current, legacy = ephemeral_container_names(role, manager.owner, execution_id)
+            info = await manager.inspect(current)
+            if info is None:
+                info = await manager.inspect(legacy)
+            if info is None:
+                return
+            name = info["Id"]
         info = await manager.inspect(name)
         if info is None:
             return

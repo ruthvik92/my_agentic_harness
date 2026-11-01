@@ -9,6 +9,29 @@ from local_agent.storage.blobs import canonical, digest, fsync_directory, privat
 from local_agent.tools.registry import definitions
 
 
+def _probe_config(config):
+    """Clone execution settings into a probe config.
+
+    Only ``execution_mode_default`` is changed to ephemeral so capability
+    probes never create persistent keepers, even when the real coding task
+    uses persistent mode. All other execution resource/timeout settings are
+    preserved. The parent config object is not mutated.
+    """
+    execution = config.execution.model_copy(update={"execution_mode_default": "ephemeral"})
+    return config.model_copy(
+        update={
+            "tools": ("read_file",),
+            "limits": Limits(
+                max_model_turns=3,
+                max_attempted_tool_calls=6,
+                run_timeout_seconds=300,
+                model_timeout_seconds=180,
+            ),
+            "execution": execution,
+        }
+    )
+
+
 async def ensure_capabilities(store, config, sandbox):
     from local_agent.runtime.agent import Agent
 
@@ -48,17 +71,7 @@ async def ensure_capabilities(store, config, sandbox):
     source = store.control / "probe_sources" / new_id("probe")
     private_directory(source)
     (source / "probe.txt").write_text("SANDBOX_CAPABILITY_OK\n")
-    probe_config = config.model_copy(
-        update={
-            "tools": ("read_file",),
-            "limits": Limits(
-                max_model_turns=3,
-                max_attempted_tool_calls=6,
-                run_timeout_seconds=300,
-                model_timeout_seconds=180,
-            ),
-        }
-    )
+    probe_config = _probe_config(config)
     task = "Call read_file once with path project/probe.txt. Read its result, then stop calling tools and reply SANDBOX_CAPABILITY_OK. This is a tool capability probe."
     result = await Agent(store, probe_config, sandbox).run(source, task, probe=True)
     passed = result["status"] == "completed_unverified"
