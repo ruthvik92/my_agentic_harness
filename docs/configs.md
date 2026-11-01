@@ -6,7 +6,7 @@ This document describes the agent configuration files in `config/`. Each YAML fi
 
 | File | Agent ID | Provider | Model | Instructions | Tools | Window | Reserve | Notes |
 |------|----------|----------|-------|--------------|-------|--------|---------|-------|
-| `coder.yaml` | `coder` | `ollama` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v3` | 9 | 65536 | 16384 | Local Ollama coding agent |
+| `coder.yaml` | `coder` | `ollama` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v3` | 11 | 131072 | 32768 | Local Ollama coding agent |
 | `analog.yaml` | `analog` | `ollama` | `qwen3.8:27b` | `analog-v2` | 11 | 65536 | 16384 | Local Ollama PDF circuit analysis |
 | `browser.yaml` | `browser` | `ollama` | `qwen3.8:27b` | `browser-v1` | 0 | 32768 | 4096 | Default browser and screenshot chat |
 
@@ -88,3 +88,66 @@ persistent-container capacity are configurable within the existing sandbox
 ceilings. The current offline policy rejects enabled networking. These are host
 operator settings, not model tool arguments. See [Docker execution lifecycle](executor.md)
 for every field, browser-editor configuration, cleanup commands, and recovery rules.
+
+## Token-limit safety model
+
+### Structural ceiling
+
+`AgentConfig.window_tokens` and `output_reserve_tokens` are bounded by a
+structural ceiling of 2,097,152 tokens, with the invariant
+`output_reserve_tokens < window_tokens`. This is distinct from the
+`ModelResponse.text` cap of 2,097,152 **characters**, which is a transport
+serialization limit, not a token budget.
+
+### Validate and Save fetch provider metadata
+
+The browser editor's **Validate** and **Save** operations perform a read-only
+fetch of provider metadata (context window, max output tokens) to verify the
+configured limits against the model's actual capabilities. These operations
+never perform inference. **Save** does mutate the profile file on success,
+writing the validated content atomically.
+
+### Offline catalog, read, and load
+
+Catalog listing, file read, and `load_config` are purely local: no provider
+metadata is fetched. Only the structural invariant is enforced.
+
+### Startup and resume re-check the effective model
+
+At live startup (`Agent.run`) and resume (`recovery.restore`), the runtime
+fetches provider metadata for the effective model and validates limits before
+any workspace work. Known violations (window exceeds context, or reserve
+exceeds provider max output) are rejected with a descriptive error.
+
+### Unknown output vs. context verification
+
+When a provider does not report a maximum output token count, a warning is
+emitted that the output reserve is unverified. This is distinct from
+context-window verification, which may still pass. The run proceeds with a
+warning.
+
+### Metadata-unavailable legacy fallback
+
+When provider metadata is entirely unavailable, a legacy policy applies:
+`window_tokens <= 131072` and `output_reserve_tokens <= 32768` are accepted
+with a warning. Larger values are rejected because they cannot be verified.
+
+### Conditional example
+
+A configuration with `window_tokens: 262144` and
+`output_reserve_tokens: 65536` yields an input budget of 196608 tokens.
+This is accepted only when the model's known context window is at least
+262144. Without known context metadata, it exceeds the legacy ceiling and
+is rejected.
+
+### Memory fit is not guaranteed
+
+The structural ceiling does not guarantee that the model's generation fits
+within available memory. The provider's `max_output_tokens` (when known) is
+the authoritative output limit.
+
+### Shipped defaults and capture caps unchanged
+
+The shipped profiles retain their existing token values. The raw response
+capture cap (8 MiB) and evidence byte budget are unchanged and apply
+independently of token-limit validation.

@@ -149,11 +149,15 @@ class Agent:
         if self.config.provider != "openai" or self.config.paid_token_limit is None:
             return
         used = 0
-        for row in self.store.db.execute("SELECT request_ref,response_ref FROM model_requests WHERE run_id=?", (self.run_id,)):
+        for row in self.store.db.execute(
+            "SELECT request_ref,response_ref FROM model_requests WHERE run_id=?", (self.run_id,)
+        ):
             if self.store.blobs.json(row[0]).get("provider") != "openai":
                 continue
             if row[1] is None:
-                raise BudgetExhausted("Paid usage is unknown after an incomplete request; automatic paid retry stopped")
+                raise BudgetExhausted(
+                    "Paid usage is unknown after an incomplete request; automatic paid retry stopped"
+                )
             response = self.store.blobs.json(row[1])
             usage = response.get("usage") or {}
             inp = usage.get("prompt_tokens", usage.get("input_tokens"))
@@ -161,8 +165,13 @@ class Agent:
             if type(inp) is not int or type(out) is not int or inp < 0 or out < 0:
                 raise BudgetExhausted("Paid usage is unknown; automatic paid calls stopped")
             used += inp + out
-        if used + snapshot.token_estimate + self.config.output_reserve_tokens > self.config.paid_token_limit:
-            raise BudgetExhausted("Paid token allowance cannot cover the next request and reserved output")
+        if (
+            used + snapshot.token_estimate + self.config.output_reserve_tokens
+            > self.config.paid_token_limit
+        ):
+            raise BudgetExhausted(
+                "Paid token allowance cannot cover the next request and reserved output"
+            )
 
     @asynccontextmanager
     async def frozen_workspace(self, workspace_id=None):
@@ -182,19 +191,32 @@ class Agent:
             messages.append(self.directory_message())
             messages.append({"role": "system", "content": GUIDE})
             if "prepare_environment" in self.config.tools:
-                messages.append({"role": "system", "content":
-                    "Inspect the environment inventory before execution. Request missing tooling with "
-                    "prepare_environment instead of repeatedly importing missing packages. Preparation "
-                    "restarts processes and preserves project files; execution stays offline. A response "
-                    "with status environment_blocked is a setup limitation, not a passing test. "
-                    "Do not repeat unchanged failed requests. Installed inventory: "
-                    + canonical(self.environment_inventory or {"status": "not probed"}).decode()})
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "Inspect the environment inventory before execution. Request missing tooling with "
+                        "prepare_environment instead of repeatedly importing missing packages. Preparation "
+                        "restarts processes and preserves project files; execution stays offline. A response "
+                        "with status environment_blocked is a setup limitation, not a passing test. "
+                        "Do not repeat unchanged failed requests. Installed inventory: "
+                        + canonical(
+                            self.environment_inventory or {"status": "not probed"}
+                        ).decode(),
+                    }
+                )
         if self.test_plan is not None:
-            if self.project_test_report and self.project_test_report.get("status") == "environment_blocked":
-                messages.append({"role": "system", "content":
-                    "Automatic test environment preparation was blocked: "
-                    + str(self.project_test_report.get("error", "unknown setup error"))
-                    + ". Inspect requirements and request a suitable environment before implementation."})
+            if (
+                self.project_test_report
+                and self.project_test_report.get("status") == "environment_blocked"
+            ):
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "Automatic test environment preparation was blocked: "
+                        + str(self.project_test_report.get("error", "unknown setup error"))
+                        + ". Inspect requirements and request a suitable environment before implementation.",
+                    }
+                )
             messages.append(
                 {
                     "role": "system",
@@ -330,8 +352,11 @@ class Agent:
             "answer": answer,
             "workspace": str(self.path),
             "diff_ref": diff_ref,
-            **({"repair_progress": self.repair_guard.public()}
-               if getattr(self, "repair_guard", None) else {}),
+            **(
+                {"repair_progress": self.repair_guard.public()}
+                if getattr(self, "repair_guard", None)
+                else {}
+            ),
             **(
                 {"project_tests": self.project_test_report}
                 if self.project_test_report is not None
@@ -374,11 +399,17 @@ class Agent:
         ):
             raise RunCancelled("cancellation requested")
         if time.monotonic() >= self.deadline:
-            raise BudgetExhausted(f"Run time limit reached ({self.config.limits.run_timeout_seconds} seconds)")
+            raise BudgetExhausted(
+                f"Run time limit reached ({self.config.limits.run_timeout_seconds} seconds)"
+            )
         if model and self.turns >= self.config.limits.max_model_turns:
-            raise BudgetExhausted(f"Model-turn limit reached: {self.turns}/{self.config.limits.max_model_turns} model requests; the agent did not complete within this budget")
+            raise BudgetExhausted(
+                f"Model-turn limit reached: {self.turns}/{self.config.limits.max_model_turns} model requests; the agent did not complete within this budget"
+            )
         if call and self.attempted >= self.config.limits.max_attempted_tool_calls:
-            raise BudgetExhausted(f"Tool-call limit reached: {self.attempted}/{self.config.limits.max_attempted_tool_calls} attempted calls")
+            raise BudgetExhausted(
+                f"Tool-call limit reached: {self.attempted}/{self.config.limits.max_attempted_tool_calls} attempted calls"
+            )
 
     def event(self, kind, actor, data):
         self.last = self.store.append(
@@ -506,8 +537,17 @@ class Agent:
             key = digest(canonical({"name": call.name, "arguments_ref": call.arguments_ref}))
             self.failures[key] += 1
             if self.failures[key] >= self.config.limits.max_identical_failures:
-                raise BudgetExhausted("three identical schema rejections: " + call.name + " — " + correction(call.name, arguments, error))
-            return {"error": "validation", "detail": error, "correction": correction(call.name, arguments, error)}, None
+                raise BudgetExhausted(
+                    "three identical schema rejections: "
+                    + call.name
+                    + " — "
+                    + correction(call.name, arguments, error)
+                )
+            return {
+                "error": "validation",
+                "detail": error,
+                "correction": correction(call.name, arguments, error),
+            }, None
         with self.spans.boundary("policy.evaluate"):
             decision = offline_evaluate(
                 call.call_id,
@@ -542,13 +582,23 @@ class Agent:
 
             fact = cached(self, normalized["arguments"])
             if fact:
-                preview = {"status": "environment_blocked", "executed": False,
-                           "error": "unchanged_unavailable_capability", "failure": fact["failure"],
-                           "evidence_ref": fact["output_ref"], "correction": fact["correction"]}
-                self.event("tool.skipped", "controller", {
-                    "skipped_call_ids": [call.call_id], "reason": "unchanged_unavailable_capability",
-                    "preview_ref": self.store.blobs.put_json(preview),
-                })
+                preview = {
+                    "status": "environment_blocked",
+                    "executed": False,
+                    "error": "unchanged_unavailable_capability",
+                    "failure": fact["failure"],
+                    "evidence_ref": fact["output_ref"],
+                    "correction": fact["correction"],
+                }
+                self.event(
+                    "tool.skipped",
+                    "controller",
+                    {
+                        "skipped_call_ids": [call.call_id],
+                        "reason": "unchanged_unavailable_capability",
+                        "preview_ref": self.store.blobs.put_json(preview),
+                    },
+                )
                 return preview, None
         with self.spans.boundary("tool.execute"):
             ctx = correlation()
@@ -599,17 +649,28 @@ class Agent:
             if call.name not in {"environment_inventory", "prepare_environment"}:
                 await self.executor.release(execution.execution_id)
             preview = result_preview(self.store, result, call.name)
-            preparation_ready = (call.name == "prepare_environment" and result.output_ref
-                                 and self.store.blobs.json(result.output_ref).get("status") == "ready")
-            if result.status == "succeeded" and (call.name in {"write_file", "patch_file", "execute_tool"} or preparation_ready):
+            preparation_ready = (
+                call.name == "prepare_environment"
+                and result.output_ref
+                and self.store.blobs.json(result.output_ref).get("status") == "ready"
+            )
+            if result.status == "succeeded" and (
+                call.name in {"write_file", "patch_file", "execute_tool"} or preparation_ready
+            ):
                 from local_agent.runtime.capability_failures import invalidate
 
                 invalidate(self, "successful tool may have changed workspace dependencies")
-            if (not trusted and result.status == "succeeded" and call.name in {"write_file", "patch_file"}
-                    and str(arguments.get("path", "")).startswith("project/")):
+            if (
+                not trusted
+                and result.status == "succeeded"
+                and call.name in {"write_file", "patch_file"}
+                and str(arguments.get("path", "")).startswith("project/")
+            ):
                 try:
                     change = json.loads(result.preview)
-                    if change.get("content_hash") and change["content_hash"] != change.get("previous_hash"):
+                    if change.get("content_hash") and change["content_hash"] != change.get(
+                        "previous_hash"
+                    ):
                         # A new code state deserves a new reproduction attempt. Unchanged
                         # writes and failed edits never reset the repeated-failure guard.
                         self.failures.clear()
@@ -620,7 +681,9 @@ class Agent:
 
                 output = result.preview
                 if result.output_ref:
-                    output = self.store.blobs.read(result.output_ref)[:65536].decode("utf-8", errors="replace")
+                    output = self.store.blobs.read(result.output_ref)[:65536].decode(
+                        "utf-8", errors="replace"
+                    )
                 failure = diagnose(result.status, result.exit_code, output, result.error)
                 record(self, normalized["arguments"], result, failure)
                 if failure["kind"] != "none":
@@ -644,7 +707,8 @@ class Agent:
                         except (ValueError, TypeError):
                             pass
                     raise BudgetExhausted(
-                        "three identical failed actions: " + call.name
+                        "three identical failed actions: "
+                        + call.name
                         + (" for " + str(arguments["path"]) if "path" in arguments else "")
                         + detail
                     )
@@ -793,6 +857,12 @@ class Agent:
                         if isinstance(self.provider, ScriptedProvider)
                         else await self.provider.metadata(self.config.model)
                     )
+                    if not isinstance(self.provider, ScriptedProvider):
+                        from local_agent.models.token_limits import validate_limits
+
+                        report = validate_limits(self.config, metadata)
+                        if not report["ok"]:
+                            raise ValueError("; ".join(report["errors"]))
                     if not probe and self.config.instructions_version.startswith("coder-"):
                         from local_agent.observability.events import TERMINAL
                         from local_agent.workspace.git import GitWorktrees
@@ -806,9 +876,16 @@ class Agent:
                                 raise ValueError("Unknown managed Git workspace")
                             if self.expected_attempt is not None and any(
                                 record.get(key) != self.expected_attempt.get(key)
-                                for key in ("workspace_id", "run_id", "candidate_commit", "repository")
+                                for key in (
+                                    "workspace_id",
+                                    "run_id",
+                                    "candidate_commit",
+                                    "repository",
+                                )
                             ):
-                                raise ValueError("Workspace changed while the continuation was queued; refresh before continuing")
+                                raise ValueError(
+                                    "Workspace changed while the continuation was queued; refresh before continuing"
+                                )
                             if self.store.run(record["run_id"])["status"] not in TERMINAL:
                                 raise ValueError(
                                     "Previous task is active; stop or finish it before continuing"
@@ -832,18 +909,27 @@ class Agent:
 
                             inherited = selected(self.store, record["run_id"])
                             if inherited.get("prepared_environment"):
-                                if (self.config.execution.container_pids_limit != 128
-                                        and inherited.get("worker_hash") != self.sandbox.get("worker_hash")):
+                                if (
+                                    self.config.execution.container_pids_limit != 128
+                                    and inherited.get("worker_hash")
+                                    != self.sandbox.get("worker_hash")
+                                ):
                                     raise ValueError(
                                         "Selected prepared image uses an older sandbox worker. "
                                         "Continue with container_pids_limit: 128, or start a new task "
                                         "from this workspace's commit and prepare its environment with the current worker."
                                     )
                                 self.sandbox = self.base_sandbox = inherited
-                                self.executor = DockerExecutor(self.store, self.workspaces,
-                                    inherited["image"], settings=self.config.execution)
+                                self.executor = DockerExecutor(
+                                    self.store,
+                                    self.workspaces,
+                                    inherited["image"],
+                                    settings=self.config.execution,
+                                )
                                 self.executor.fault_hook = self.fault
-                                self.environment_inventory = inherited["prepared_environment"].get("inventory")
+                                self.environment_inventory = inherited["prepared_environment"].get(
+                                    "inventory"
+                                )
                             if self.expected_workspace is not None:
                                 from local_agent.mobile.repair_controls import (
                                     validate_repair_target,
@@ -851,12 +937,17 @@ class Agent:
 
                                 if previous != self.expected_workspace["workspace_id"]:
                                     raise ValueError("Repair workspace changed")
-                                validate_repair_target(self.store.root, self.expected_workspace, source)
+                                validate_repair_target(
+                                    self.store.root, self.expected_workspace, source
+                                )
                             # Quiesce any retained keeper before capturing the next task's state.
                             container_record = (
                                 self.store.control / "containers" / (previous + ".json")
                             )
-                            if container_record.exists() and self.config.execution.execution_mode_default == "ephemeral":
+                            if (
+                                container_record.exists()
+                                and self.config.execution.execution_mode_default == "ephemeral"
+                            ):
                                 from local_agent.executor.maintenance import sweep
 
                                 await sweep(
@@ -866,7 +957,9 @@ class Agent:
                                     workspace_id=previous,
                                 )
                             else:
-                                await snapshot_guard.enter_async_context(self.frozen_workspace(previous))
+                                await snapshot_guard.enter_async_context(
+                                    self.frozen_workspace(previous)
+                                )
                             self.working_directory = self.workspace_options.get(
                                 "working_directory", record.get("working_directory", ".")
                             )
@@ -1020,11 +1113,17 @@ class Agent:
                 if node_roots and resume_run_id is None:
                     from local_agent.environments.service import HYDRATE
 
-                    _, hydrated = await self.trusted("run_command", {
-                        "argv": ["python", "-I", "-c", HYDRATE, json.dumps(node_roots)],
-                    }, "environment_hydrate")
+                    _, hydrated = await self.trusted(
+                        "run_command",
+                        {
+                            "argv": ["python", "-I", "-c", HYDRATE, json.dumps(node_roots)],
+                        },
+                        "environment_hydrate",
+                    )
                     if hydrated is None or hydrated.status != "succeeded":
-                        raise RuntimeError("Prepared npm dependencies could not be copied into the workspace")
+                        raise RuntimeError(
+                            "Prepared npm dependencies could not be copied into the workspace"
+                        )
                 if "environment_inventory" in self.config.tools:
                     await self.trusted("environment_inventory", {}, "environment_inventory")
                 self.verifier = verify_fixture if isinstance(verify_fixture, str) else "calculator"
@@ -1102,20 +1201,36 @@ class Agent:
                                 },
                             )
                             prior_repair = any(
-                                e.event_type == "retry.decided" and e.data.get("rule") == "local-tool-response-repair-v1"
+                                e.event_type == "retry.decided"
+                                and e.data.get("rule") == "local-tool-response-repair-v1"
                                 for e in self.store.events(self.run_id)
                             )
-                            if (self.config.provider == "ollama" and self.config.tools
-                                    and getattr(exc, "recoverable_tool_error", False)
-                                    and not prior_repair):
-                                self.event("retry.decided", "runtime", {
-                                    "prior_request_id": request.request_id,
-                                    "selected_action": "one_corrected_local_response",
-                                    "rule": "local-tool-response-repair-v1"})
-                                self.groups.append([{"role": "user", "content":
-                                    "Controller feedback: the preceding model response could not be parsed or exceeded its output limit. No tool calls from it were dispatched. "
-                                    "Produce exactly one small tool call with complete valid JSON. Do not repeat a large batch or rewrite whole files; prefer a small exact patch. "
-                                    "The same model-turn/time limits still apply. Error: " + str(exc)[:1200]}])
+                            if (
+                                self.config.provider == "ollama"
+                                and self.config.tools
+                                and getattr(exc, "recoverable_tool_error", False)
+                                and not prior_repair
+                            ):
+                                self.event(
+                                    "retry.decided",
+                                    "runtime",
+                                    {
+                                        "prior_request_id": request.request_id,
+                                        "selected_action": "one_corrected_local_response",
+                                        "rule": "local-tool-response-repair-v1",
+                                    },
+                                )
+                                self.groups.append(
+                                    [
+                                        {
+                                            "role": "user",
+                                            "content": "Controller feedback: the preceding model response could not be parsed or exceeded its output limit. No tool calls from it were dispatched. "
+                                            "Produce exactly one small tool call with complete valid JSON. Do not repeat a large batch or rewrite whole files; prefer a small exact patch. "
+                                            "The same model-turn/time limits still apply. Error: "
+                                            + str(exc)[:1200],
+                                        }
+                                    ]
+                                )
                                 self.checkpoint()
                                 continue
                             raise
@@ -1185,8 +1300,9 @@ class Agent:
             from local_agent.runtime.repair_progress import LocalStalled
 
             status = (
-                "local_stalled" if isinstance(exc, LocalStalled) else
-                "budget_exhausted"
+                "local_stalled"
+                if isinstance(exc, LocalStalled)
+                else "budget_exhausted"
                 if isinstance(exc, BudgetExhausted)
                 else (
                     "cancelled"
@@ -1240,8 +1356,11 @@ class Agent:
                 "run_id": self.run_id,
                 "status": status,
                 "error": str(exc),
-                **({"repair_progress": self.repair_guard.public()}
-                   if getattr(self, "repair_guard", None) else {}),
+                **(
+                    {"repair_progress": self.repair_guard.public()}
+                    if getattr(self, "repair_guard", None)
+                    else {}
+                ),
                 **(
                     {"project_tests": self.project_test_report}
                     if self.project_test_report is not None

@@ -17,6 +17,11 @@ async def ensure_capabilities(store, config, sandbox):
         metadata = await provider.metadata(config.model)
     finally:
         await provider.close()
+    from local_agent.models.token_limits import validate_limits
+
+    report = validate_limits(config, metadata)
+    if not report["ok"]:
+        raise ValueError("; ".join(report["errors"]))
     key = digest(
         canonical(
             {

@@ -167,6 +167,7 @@
       selected = null; editorName = name;
       await refresh(name, window.__allowedRoots || []);
       closeEditor();
+      if (res && res.message) setDetail(res.message);
     }));
     el('config-refresh').addEventListener('click', () => guarded(async () => {
       await refresh(el('config-select').value, window.__allowedRoots || []);

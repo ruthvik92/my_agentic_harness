@@ -27,7 +27,9 @@ async def reconcile(agent, row):
         outcome = "published_result"
     elif execution.tool in {"environment_inventory", "prepare_environment"}:
         # Build/download side effects cannot be inferred from Docker logs or replayed.
-        raise NeedsReconciliation("Environment preparation was interrupted without a published result; inspect its recorded commands before retrying")
+        raise NeedsReconciliation(
+            "Environment preparation was interrupted without a published result; inspect its recorded commands before retrying"
+        )
     else:
         mapping = agent.executor.mapping(execution.execution_id)
         if mapping:
@@ -173,6 +175,11 @@ async def restore(agent, run_id):
         metadata = await agent.provider.metadata(agent.config.model)
         if metadata["installed"]["digest"] != manifest["model_identity"]:
             raise NeedsReconciliation("model digest changed; no automatic inference")
+        from local_agent.models.token_limits import validate_limits
+
+        report = validate_limits(agent.config, metadata)
+        if not report["ok"]:
+            raise ValueError("; ".join(report["errors"]))
 
     from local_agent.contracts import AgentConfig
 
@@ -181,7 +188,10 @@ async def restore(agent, run_id):
         raise NeedsReconciliation("agent configuration changed; no automatic dispatch")
     if config["policy_hash"] not in {OFFLINE_HASH, LEGACY_OFFLINE_HASH}:
         raise NeedsReconciliation("effective policy changed; no automatic dispatch")
-    if config["policy_hash"] == LEGACY_OFFLINE_HASH and agent.config.execution.container_pids_limit != 128:
+    if (
+        config["policy_hash"] == LEGACY_OFFLINE_HASH
+        and agent.config.execution.container_pids_limit != 128
+    ):
         raise NeedsReconciliation("legacy policy requires the original 128-task limit")
     agent.policy_hash = config["policy_hash"]
     agent.run_id = run_id
@@ -204,7 +214,9 @@ async def restore(agent, run_id):
         from local_agent.executor.docker import DockerExecutor
 
         agent.sandbox = active_sandbox
-        agent.executor = DockerExecutor(store, agent.workspaces, active_sandbox["image"], settings=agent.config.execution)
+        agent.executor = DockerExecutor(
+            store, agent.workspaces, active_sandbox["image"], settings=agent.config.execution
+        )
         agent.executor.fault_hook = agent.fault
         agent.environment_inventory = active_sandbox["prepared_environment"].get("inventory")
     agent.test_retries = sum(e.event_type == "project.tests" for e in store.events(run_id))
@@ -302,11 +314,19 @@ async def restore(agent, run_id):
                 else:
                     result = await reconcile(agent, attempt)
                 content = result_preview(store, result, call.name)
-            elif any(e.event_type == "tool.skipped" and e.data.get("preview_ref")
-                     and call.call_id in e.data.get("skipped_call_ids", []) for e in prior):
-                skipped = next(e for e in reversed(prior) if e.event_type == "tool.skipped"
-                               and e.data.get("preview_ref")
-                               and call.call_id in e.data.get("skipped_call_ids", []))
+            elif any(
+                e.event_type == "tool.skipped"
+                and e.data.get("preview_ref")
+                and call.call_id in e.data.get("skipped_call_ids", [])
+                for e in prior
+            ):
+                skipped = next(
+                    e
+                    for e in reversed(prior)
+                    if e.event_type == "tool.skipped"
+                    and e.data.get("preview_ref")
+                    and call.call_id in e.data.get("skipped_call_ids", [])
+                )
                 content = store.blobs.json(skipped.data["preview_ref"])
             elif call_row["rejected"]:
                 rejected = next(

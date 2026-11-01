@@ -115,8 +115,14 @@ class AgentConfig(Record):
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
     repair_progress: RepairProgressSettings = Field(default_factory=RepairProgressSettings)
-    window_tokens: int = Field(default=8192, ge=2048, le=131072)
-    output_reserve_tokens: int = Field(default=2048, ge=256, le=32768)
+    window_tokens: int = Field(default=8192, ge=2048, le=2097152)
+    output_reserve_tokens: int = Field(default=2048, ge=256, le=2097152)
+
+    @model_validator(mode="after")
+    def reserve_below_window(self):
+        if self.output_reserve_tokens >= self.window_tokens:
+            raise ValueError("output_reserve_tokens must be strictly less than window_tokens")
+        return self
 
     @model_validator(mode="after")
     def offline_policy_forbids_network(self):
@@ -172,7 +178,7 @@ class ProposedCall(Record):
 
 class ModelResponse(Record):
     request_id: ID
-    text: str = Field(default="", max_length=65536)
+    text: str = Field(default="", max_length=2097152)
     tool_calls: tuple[ProposedCall, ...] = Field(default=(), max_length=100)
     finish_status: Literal["stop", "tool_calls", "error"]
     usage: dict[str, JsonValue] | None = None
@@ -325,7 +331,9 @@ class EnvironmentInventoryArgs(Record):
 class PrepareEnvironmentArgs(Record):
     reason: str = Field(min_length=1, max_length=1000)
     runtimes: tuple[Literal["python", "node"], ...] = Field(default=(), max_length=2)
-    capabilities: tuple[Literal["headless_browser", "browser_interaction"], ...] = Field(default=(), max_length=2)
+    capabilities: tuple[Literal["headless_browser", "browser_interaction"], ...] = Field(
+        default=(), max_length=2
+    )
     dependency_manifests: tuple[PathText, ...] = Field(default=(), max_length=12)
     system_packages: tuple[str, ...] = Field(default=(), max_length=32)
     python_packages: tuple[str, ...] = Field(default=(), max_length=32)
@@ -336,7 +344,10 @@ class PrepareEnvironmentArgs(Record):
         for path in value:
             validate_path(path)
             if not path.startswith("project/") or path.rsplit("/", 1)[-1] not in {
-                "pyproject.toml", "uv.lock", "package.json", "package-lock.json"
+                "pyproject.toml",
+                "uv.lock",
+                "package.json",
+                "package-lock.json",
             }:
                 raise ValueError("Use project-relative Python or npm dependency manifests")
             if ".git" in path.split("/"):
@@ -348,7 +359,10 @@ class PrepareEnvironmentArgs(Record):
     def registry_system_packages(cls, value):
         import re
 
-        if any(not re.fullmatch(r"[a-z0-9][a-z0-9+.-]{0,80}(?:=[A-Za-z0-9.+:~_-]{1,80})?", p) for p in value):
+        if any(
+            not re.fullmatch(r"[a-z0-9][a-z0-9+.-]{0,80}(?:=[A-Za-z0-9.+:~_-]{1,80})?", p)
+            for p in value
+        ):
             raise ValueError("Use Debian package names/versions, never commands, URLs or options")
         return value
 
@@ -357,7 +371,13 @@ class PrepareEnvironmentArgs(Record):
     def registry_python_packages(cls, value):
         import re
 
-        if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}(?:\[[A-Za-z0-9_,.-]+\])?(?:[<>=!~]{1,2}[A-Za-z0-9.*+_-]+(?:,[<>=!~]{1,2}[A-Za-z0-9.*+_-]+)*)?", p) for p in value):
+        if any(
+            not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}(?:\[[A-Za-z0-9_,.-]+\])?(?:[<>=!~]{1,2}[A-Za-z0-9.*+_-]+(?:,[<>=!~]{1,2}[A-Za-z0-9.*+_-]+)*)?",
+                p,
+            )
+            for p in value
+        ):
             raise ValueError("Use Python registry requirements, never URLs, paths or options")
         return value
 

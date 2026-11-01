@@ -14,9 +14,11 @@ def metadata(name: str, config: AgentConfig) -> Dict[str, Any]:
     return {
         "name": name,
         "kind": "agent",
-        "mode": "chat" if config.instructions_version in ["phone-v1", "browser-v1"] else
-                "circuit" if config.instructions_version in ["analog-v1", "analog-v2"] else
-                "coding",
+        "mode": "chat"
+        if config.instructions_version in ["phone-v1", "browser-v1"]
+        else "circuit"
+        if config.instructions_version in ["analog-v1", "analog-v2"]
+        else "coding",
         "provider": config.provider,
         "model": config.model,
         "instructions_version": config.instructions_version,
@@ -24,19 +26,48 @@ def metadata(name: str, config: AgentConfig) -> Dict[str, Any]:
         "project_tests": config.project_tests,
         "window_tokens": config.window_tokens,
         "output_reserve_tokens": config.output_reserve_tokens,
-        "limits": config.limits.model_dump(mode='json'),
+        "limits": config.limits.model_dump(mode="json"),
         "api_key_env": config.api_key_env,
         "execution": config.execution.model_dump(mode="json"),
         "environment": config.environment.model_dump(mode="json"),
         "repair_progress": config.repair_progress.model_dump(mode="json"),
     }
 
-def validate_profile(name: str, content: str) -> Dict[str, Any]:
+
+def _provider_message(report: Dict[str, Any], config: AgentConfig) -> str:
+    limits = report.get("limits") or {}
+    context_window = limits.get("context_window")
+    max_output = limits.get("max_output_tokens")
+    window = config.window_tokens
+    reserve = config.output_reserve_tokens
+    budget = None
+    if isinstance(window, int) and isinstance(reserve, int):
+        budget = window - reserve
+    parts = []
+    if isinstance(context_window, int):
+        parts.append(f"model reports a context maximum of {context_window} tokens")
+    else:
+        parts.append("model context maximum is unknown")
+    if isinstance(max_output, int):
+        parts.append(f"reported output maximum of {max_output} tokens")
+    else:
+        parts.append("reported output maximum is unknown")
+    if budget is not None:
+        parts.append(f"configured input budget is {budget} tokens")
+        parts.append(f"configured output reserve is {reserve} tokens")
+    parts.append(f"model {config.model}")
+    warnings = report.get("warnings") or []
+    if warnings:
+        parts.append("warnings: " + "; ".join(str(w) for w in warnings))
+    return ", ".join(parts) + "."
+
+
+def validate_profile(name: str, content: str, *, check_provider: bool = False) -> Dict[str, Any]:
     if not isinstance(content, str):
         raise ValueError("Profile content must be a string")
     if not content:
         raise ValueError("Profile content cannot be empty")
-    if len(content.encode('utf-8')) > 65536:
+    if len(content.encode("utf-8")) > 65536:
         raise ValueError("Profile content exceeds 65536 bytes in UTF-8")
 
     # Handle sandbox.json specially
@@ -47,16 +78,27 @@ def validate_profile(name: str, content: str) -> Dict[str, Any]:
             raise ValueError(f"Invalid JSON in sandbox.json: {e}") from e
         if not isinstance(parsed, dict):
             raise ValueError("sandbox.json must contain a JSON object")
-        if type(parsed.get('schema_version')) is not int or parsed.get('schema_version') != 1:
+        if type(parsed.get("schema_version")) is not int or parsed.get("schema_version") != 1:
             raise ValueError("schema_version must be the integer 1")
-        image = parsed.get('image')
+        image = parsed.get("image")
         if not isinstance(image, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
             raise ValueError("image must be a valid sha256: lowercase hex string")
-        allowed_keys = {"schema_version", "image", "base_image", "base_reference", "worker_hash", "verifier_hash", "pdf_helper_hash", "toolkit_hashes"}
+        allowed_keys = {
+            "schema_version",
+            "image",
+            "base_image",
+            "base_reference",
+            "worker_hash",
+            "verifier_hash",
+            "pdf_helper_hash",
+            "toolkit_hashes",
+        }
         unknown_keys = set(parsed.keys()) - allowed_keys
         if unknown_keys:
             raise ValueError(f"Unknown keys in sandbox.json: {unknown_keys}")
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', encoding='utf-8', delete=False) as temp:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", encoding="utf-8", delete=False
+        ) as temp:
             temp.write(content)
             temp.flush()
             temp_path = Path(temp.name)
@@ -66,19 +108,16 @@ def validate_profile(name: str, content: str) -> Dict[str, Any]:
             raise ValueError(f"Invalid sandbox.json: {e}") from e
         finally:
             temp_path.unlink(missing_ok=True)
-        return {
-            "name": "sandbox.json",
-            "kind": "sandbox",
-            "mode": "infrastructure",
-            "image": image
-        }
+        return {"name": "sandbox.json", "kind": "sandbox", "mode": "infrastructure", "image": image}
 
     # For other profiles, treat as YAML
     try:
         config = yaml.safe_load(content)
         if not isinstance(config, dict):
             raise ValueError("Profile must be a dictionary")
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', encoding='utf-8', delete=False) as temp:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", encoding="utf-8", delete=False
+        ) as temp:
             temp.write(content)
             temp.flush()
             temp_path = Path(temp.name)
@@ -87,12 +126,28 @@ def validate_profile(name: str, content: str) -> Dict[str, Any]:
             # Reject phone-v1 with nonempty tools
             if loaded_config.instructions_version == "phone-v1" and loaded_config.tools:
                 raise ValueError("phone-v1 instructions_version cannot have non-empty tools")
-            return metadata(name, loaded_config)
+            result = metadata(name, loaded_config)
+            if check_provider:
+                from local_agent.models.token_limits import check_provider_limits
+
+                report = check_provider_limits(loaded_config)
+                if not report.get("ok"):
+                    errors = report.get("errors") or []
+                    raise ValueError(
+                        "Provider limits check failed: " + "; ".join(str(e) for e in errors)
+                    )
+                result["provider_limits"] = report
+                result["message"] = _provider_message(report, loaded_config)
+            return result
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Invalid profile config: {e}") from e
         finally:
             temp_path.unlink(missing_ok=True)
     except yaml.YAMLError as e:
         raise ValueError(f"Invalid YAML: {e}") from e
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Unexpected error: {e}") from e

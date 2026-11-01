@@ -1,4 +1,5 @@
 """High-level profile catalog, read, validate, load, and save operations."""
+
 import os
 import tempfile
 import threading
@@ -84,7 +85,7 @@ class Profiles:
 
     def validate(self, name, content):
         check_name(name)
-        meta = validate_profile(name, content)
+        meta = validate_profile(name, content, check_provider=True)
         meta["valid"] = True
         return meta
 
@@ -114,6 +115,26 @@ class Profiles:
     def save(self, name, content, expected_hash=None):
         check_name(name)
         with self.lock:
-            validate_profile(name, content)
+            meta = validate_profile(name, content, check_provider=True)
+            meta["valid"] = True
             atomic_save(str(self.directory), name, content, expected_hash=expected_hash)
-            return self.read(name)
+            # Build the result without a second metadata lookup.
+            entry_hash = digest(content.encode("utf-8"))
+            # checked_meta is what entry.metadata should hold (the full checked result).
+            checked_meta = dict(meta)
+            checked_meta["name"] = name
+            checked_meta["content"] = content
+            checked_meta["hash"] = entry_hash
+            # Top-level result: preserve old entry fields + expose valid/message/provider_limits.
+            result = {
+                "name": name,
+                "content": content,
+                "hash": entry_hash,
+                "valid": True,
+                "metadata": checked_meta,
+            }
+            if "provider_limits" in meta:
+                result["provider_limits"] = meta["provider_limits"]
+            if "message" in meta:
+                result["message"] = meta["message"]
+            return result

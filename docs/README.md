@@ -3,6 +3,8 @@
 Start with the [functional instruction manual](functional-manual.md) for the
 end-to-end user workflow, or [the TLDR](tldr.md) for command-line setup.
 The [detailed implementation guide](guide.md) explains the internals.
+For foundations, terminology and the distinctions between runs, workspaces,
+verification and review, read [key concepts and glossary](key-concepts.md).
 
 | Topic | Guide |
 |---|---|
