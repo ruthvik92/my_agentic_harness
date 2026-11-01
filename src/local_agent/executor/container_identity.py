@@ -16,6 +16,7 @@ def container_role(store, run_id):
 
     The classification is derived ONLY from the protected run manifest:
     ``run(run_id) -> sqliteRow['manifest_ref'] -> blobs.json(ref)`` and then
+    ``manifest['config_ref'] -> blobs.json(config_ref)`` and
     ``config['probe'] is True``. Missing or non-strict-True flags (including
     historical manifests without the flag) classify as a normal task.
     """
@@ -31,8 +32,7 @@ def ephemeral_container_names(role, owner, execution_id):
     Probe containers use a human-recognizable name that includes the owner and
     the probe role, with the legacy name returned as a fallback so cleanup can
     find containers created before the probe naming scheme existed. Normal task
-    ephemeral containers keep the existing ``local-agent-<execution_id>`` name
-    only (no duplicate).
+    ephemeral containers keep the existing ``local-agent-<execution_id>`` name.
 
     The pair may coincide for normal tasks (current == legacy); callers must
     deduplicate equal names before probing. The API stays a pair because the

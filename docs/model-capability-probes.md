@@ -28,17 +28,18 @@ Probes are bounded to prevent runaway cost or time:
 
 ## Cache
 
-The probe result is cached by exact deployment inputs (provider, model,
-endpoint, image, schemas, instructions, context and output limits). A cache hit
-avoids another probe agent invocation; the metadata is still queried to compute
-the cache key, but no new inference run is started on a hit.
+The probe result is cached by exact deployment inputs: the installed digest,
+provider version metadata (ollama/openai), provider, completion token field,
+sandbox image, tool schemas, instructions hash, context window, and reserve.
+A cache hit avoids another probe agent invocation; the metadata is still
+queried to compute the cache key, but no new inference run is started on a hit.
 
 ## Separate workspace
 
-Probes use their own workspace (`probe_sources/<id>`) containing only
-`probe.txt`. This is the input fixture only; the actual retained workspace is
-`<data-root>/sandboxes/ws.../project`. They do not touch the game workspace or
-any production files.
+Probes use their own workspace (`<data-root>/control/probe_sources/<id>`)
+containing only `probe.txt`. This is the input fixture only; the actual copied
+workspace is `<data-root>/sandboxes/ws_<id>/project`. They do not touch the
+game workspace or any production files.
 
 ## Ephemeral execution
 
@@ -57,7 +58,8 @@ invocation, not one shared container). Containers are named:
 - **Normal task ephemeral:** `local-agent-<execution_id>`
 
 Container IDs are assigned by Docker. Role labels are diagnostic metadata only
-and never grant permissions:
+and never grant permissions. They apply to newly created containers; older
+reused keepers may lack the role label:
 
 - `local-agent.role=capability-probe` for probe containers
 - `local-agent.role=task` for normal task containers

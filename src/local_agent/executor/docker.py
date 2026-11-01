@@ -13,11 +13,11 @@ from local_agent.contracts import (
     ExecutionResult,
     ExecutionSettings,
 )
-from local_agent.executor.lifecycle import ExecutionManager, publish
 from local_agent.executor.container_identity import (
     container_role,
     ephemeral_container_names,
 )
+from local_agent.executor.lifecycle import ExecutionManager, publish
 from local_agent.executor.worker import validate_execution_options
 from local_agent.storage.blobs import canonical
 
@@ -551,7 +551,7 @@ class DockerExecutor:
             mapping
             and (
                 info["Id"] != mapping["container_id"]
-                or labels.get("local-agent.owner") != mapping["owner"]
+                or labels.get("local-agent.owner") != manager.owner
                 or labels.get("local-agent.mode") != "ephemeral"
             )
             or (
