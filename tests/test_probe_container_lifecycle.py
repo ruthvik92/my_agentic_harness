@@ -39,6 +39,7 @@ def _make_config(tmp_path):
 def test_probe_config_parent_persistent_to_ephemeral(tmp_path):
     config = _make_config(tmp_path)
     assert config.execution.execution_mode_default == "persistent"
+    parent_snapshot = config.model_dump()
     probe = _probe_config(config)
     assert probe.execution.execution_mode_default == "ephemeral"
     # All other execution fields preserved.
@@ -48,6 +49,7 @@ def test_probe_config_parent_persistent_to_ephemeral(tmp_path):
     assert probe.execution.max_execution_seconds == 120
     # Parent config unchanged.
     assert config.execution.execution_mode_default == "persistent"
+    assert config.model_dump() == parent_snapshot
     # Tools restricted to read_file.
     assert probe.tools == ("read_file",)
     # Limits.
@@ -79,7 +81,7 @@ def test_container_role_false_missing_one_string(tmp_path):
         manifest_ref = blobs.put_json({"config_ref": config_ref})
         store = SimpleNamespace(
             blobs=blobs,
-            run=lambda run_id: {"manifest_ref": manifest_ref},
+            run=lambda run_id, _mr=manifest_ref: {"manifest_ref": _mr},
         )
         assert container_role(store, f"run{i}") == TASK_ROLE
 

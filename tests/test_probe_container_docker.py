@@ -1,411 +1,478 @@
-"""Docker acceptance tests for probe container lifecycle and cleanup.
+"""Docker acceptance tests for capability-probe container identity and release."""
 
-These tests require ``--docker-image`` and a running Docker daemon. They use a
-scripted provider (no real inference) and inspect real Docker containers to
-verify probe naming, labels, and cleanup behavior across lifecycle variants.
-"""
-
-import copy
+import asyncio
 import json
+import subprocess
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from local_agent.config import load_config
-from local_agent.contracts import new_id
-from local_agent.executor.container_identity import (
-    PROBE_ROLE,
-    TASK_ROLE,
-    container_role,
-    ephemeral_container_names,
-)
-from local_agent.executor.docker import DockerExecutor
-from local_agent.storage.database import Store
-from local_agent.workspace.manager import Workspaces
+from local_agent.doctor import sandbox_config
+from local_agent.executor.docker import DockerExecutor, ExecutionSettings
+from local_agent.models.capabilities import _probe_config
+from local_agent.models.scripted import ScriptedProvider
+from local_agent.runtime.agent import Agent
+
+MARKER = "SANDBOX_CAPABILITY_OK"
 
 
-def _probe_config(parent):
-    """Clone a persistent parent config into an ephemeral probe config."""
-    execution = parent.execution.model_copy(update={"execution_mode_default": "ephemeral"})
-    return parent.model_copy(
-        update={
-            "tools": ("read_file",),
-            "execution": execution,
-        }
+def _docker_inspect(name):
+    proc = subprocess.run(
+        ["docker", "inspect", name], capture_output=True, text=True, check=False
+    )
+    if proc.returncode != 0:
+        return None
+    return json.loads(proc.stdout)[0]
+
+
+def _force_remove(names):
+    for name in names:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+
+
+def _probe_responses():
+    return (
+        {
+            "text": "Reading the probe file.",
+            "tool_calls": [{"name": "read_file", "arguments": {"path": "project/probe.txt"}}],
+            "finish_status": "tool_calls",
+        },
+        {"text": MARKER, "tool_calls": [], "finish_status": "stop"},
     )
 
 
-def _parent_config():
-    cfg = load_config()
-    return cfg.model_copy(
+def _run_probe(tmp_path, image):
+    root = tmp_path / "data"
+    source = tmp_path / "probe_source"
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
+
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
         update={
+            "project_tests": False,
             "window_tokens": 8192,
             "output_reserve_tokens": 2048,
-            "project_tests": False,
-            "execution": cfg.execution.model_copy(update={"execution_mode_default": "persistent"}),
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
         }
     )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+
+    from local_agent.storage.database import Store
+
+    store = Store(root)
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
+
+    original_release = agent.executor.release
+
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        manager = agent.executor.make_manager(lambda *_: None)
+        info = await manager.inspect(container_id)
+        assert info is not None
+        assert info["Name"].lstrip("/") == f"local-agent-{manager.owner[:12]}-probe-{execution_id}"
+        labels = info.get("Config", {}).get("Labels", {})
+        assert labels.get("local-agent.role") == "capability-probe"
+        assert labels.get("local-agent.mode") == "ephemeral"
+        assert labels.get("local-agent.run") == agent.run_id
+        assert labels.get("local-agent.workspace") == agent.workspace_id
+        assert labels.get("local-agent.execution") == execution_id
+        return await original_release(execution_id)
+
+    agent.executor.release = wrapped_release
+
+    try:
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known, "probe container was not observed"
+        for container_id in known:
+            assert _docker_inspect(container_id) is None
+        assert not (store.control / "containers" / f"{agent.workspace_id}.json").exists()
+        from local_agent.observability.audit import audit
+
+        audit_result = audit(store, agent.run_id)
+        assert audit_result["ok"], f"audit failed: {audit_result}"
+    finally:
+        store.close()
+        _force_remove(known)
+    return result, known
 
 
-def _sandbox_config():
-    from local_agent.executor.docker import sandbox_config
-
-    return sandbox_config()
-
-
-def _docker(*args):
-    """Run a docker CLI command and return (returncode, stdout, stderr)."""
-    import subprocess
-
-    proc = subprocess.run(
-        ["docker", *args], capture_output=True, text=True, timeout=30
-    )
-    return proc.returncode, proc.stdout, proc.stderr
-
-
-def _inspect(container_id):
-    """Return docker inspect JSON for a container, or None if absent."""
-    rc, out, _ = _docker("inspect", container_id)
-    if rc != 0:
-        return None
-    return json.loads(out)[0]
-
-
-def _remove(container_id):
-    """Force-remove a container (best-effort)."""
-    _docker("rm", "-f", container_id)
-
-
-class ScriptedProvider:
-    """Two-response scripted provider: read_file then SANDBOX_CAPABILITY_OK."""
-
-    def __init__(self, blobs, config):
-        self.blobs = blobs
-        self.config = config
-        self._responses = [
-            {"text": "", "tool_calls": [{"name": "read_file", "arguments": {"path": "project/probe.txt"}}], "finish_status": "tool_calls"},
-            {"text": "SANDBOX_CAPABILITY_OK", "tool_calls": [], "finish_status": "stop"},
-        ]
-        self._index = 0
-
-    async def metadata(self, model):
-        return {"installed": {"digest": "scripted-digest"}}
-
-    async def complete(self, request):
-        resp = self._responses[min(self._index, len(self._responses) - 1)]
-        self._index += 1
-        return resp
-
-    async def close(self):
-        pass
-
-
-def _make_store(tmp_path):
-    store = Store(tmp_path / "data")
-    return store
-
-
-def _setup_probe_run(store, source_dir, image):
-    """Create a workspace and run manifest for a probe run."""
-    workspaces = Workspaces(store.root)
-    workspace_id, path = workspaces.create(source_dir)
-    run_id = new_id("run")
-    from local_agent.contracts import RunManifest
-    from local_agent.storage.blobs import digest
-
-    config_ref = store.blobs.put_json(
-        {"policy": "offline", "policy_hash": "h", "agent": {"execution": {}}}
-    )
-    store.create_run(
-        RunManifest(
-            run_id=run_id,
-            thread_id=new_id("thread"),
-            workspace_id=workspace_id,
-            config_ref=config_ref,
-            config_hash=digest(store.blobs.read(config_ref)),
-            model_identity="scripted-probe",
-            sandbox_image_digest=image,
-            mode="live",
-            package_versions={},
-        )
-    )
-    store.transition(run_id, "running")
-    return workspace_id, run_id
-
-
-@pytest.mark.parametrize(
-    "variant",
-    ["normal", "missing_mapping", "legacy_missing_mapping", "legacy_missing_labels", "foreign_owner"],
-)
-async def test_probe_lifecycle_variant(tmp_path, request, variant):
+def test_probe_release_normal(tmp_path, request):
     image = request.config.getoption("--docker-image")
     if image is None:
         pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    result, known = _run_probe(tmp_path, image)
+    assert result["status"] == "completed_unverified"
 
-    from local_agent.runtime.agent import Agent
 
-    store = _make_store(tmp_path)
-    parent = _parent_config()
-    probe_cfg = _probe_config(parent)
-    sandbox_meta = {**_sandbox_config(), "image": image}
-
-    # Create a source folder with probe.txt
+def test_probe_release_missing_mapping(tmp_path, request):
+    image = request.config.getoption("--docker-image")
+    if image is None:
+        pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    root = tmp_path / "data"
     source = tmp_path / "probe_source"
-    source.mkdir()
-    (source / "probe.txt").write_text("SANDBOX_CAPABILITY_OK\n")
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
 
-    workspace_id, run_id = _setup_probe_run(store, source, image)
+    from local_agent.storage.database import Store
 
-    # Track created container IDs for cleanup
-    created_ids = []
+    store = Store(root)
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
+        update={
+            "project_tests": False,
+            "window_tokens": 8192,
+            "output_reserve_tokens": 2048,
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
+        }
+    )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
 
-    # Intercept executor.release to inspect the container before cleanup
-    executor = DockerExecutor(store, Workspaces(store.root), image, settings=probe_cfg.execution)
+    original_release = agent.executor.release
 
-    original_release = executor.release
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        (store.control / "attempts" / f"{execution_id}.container.json").unlink()
+        return await original_release(execution_id)
 
-    async def intercepting_release(execution_id):
-        # Resolve the execution request to identify the tool
-        row = store.db.execute(
-            "SELECT request_ref FROM execution_attempts WHERE id=?", (execution_id,)
-        ).fetchone()
-        if row is None:
-            await original_release(execution_id)
-            return
-        req = json.loads(store.blobs.read(row["request_ref"]))
-        tool = req.get("tool", "")
+    agent.executor.release = wrapped_release
+    try:
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known
+        for container_id in known:
+            assert _docker_inspect(container_id) is None
+    finally:
+        store.close()
+        _force_remove(known)
 
-        if tool != "read_file":
-            # For other trusted calls, immediately call original release
-            await original_release(execution_id)
-            return
 
-        # For read_file: inspect the container before cleanup
-        mapping = executor.mapping(execution_id)
-        if mapping:
-            container_id = mapping["container_id"]
-        else:
-            # Derive name from role
-            from local_agent.executor.lifecycle import ExecutionManager
-            manager = executor.make_manager(lambda *a: None)
-            current, legacy = ephemeral_container_names(PROBE_ROLE, manager.owner, execution_id)
-            info = await manager.inspect(current)
+def test_probe_release_legacy_missing_mapping(tmp_path, request):
+    image = request.config.getoption("--docker-image")
+    if image is None:
+        pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    root = tmp_path / "data"
+    source = tmp_path / "probe_source"
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
+
+    from local_agent.storage.database import Store
+
+    store = Store(root)
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
+        update={
+            "project_tests": False,
+            "window_tokens": 8192,
+            "output_reserve_tokens": 2048,
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
+        }
+    )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
+
+    original_release = agent.executor.release
+
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        (store.control / "attempts" / f"{execution_id}.container.json").unlink()
+        subprocess.run(
+            ["docker", "rename", container_id, f"local-agent-{execution_id}"],
+            capture_output=True,
+            check=True,
+        )
+        return await original_release(execution_id)
+
+    agent.executor.release = wrapped_release
+    try:
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known
+        for container_id in known:
+            assert _docker_inspect(container_id) is None
+    finally:
+        store.close()
+        _force_remove(known)
+
+
+def test_probe_release_legacy_missing_labels(tmp_path, request, monkeypatch):
+    image = request.config.getoption("--docker-image")
+    if image is None:
+        pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    root = tmp_path / "data"
+    source = tmp_path / "probe_source"
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
+
+    from local_agent.storage.database import Store
+
+    store = Store(root)
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
+        update={
+            "project_tests": False,
+            "window_tokens": 8192,
+            "output_reserve_tokens": 2048,
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
+        }
+    )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
+
+    original_release = agent.executor.release
+
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        (store.control / "attempts" / f"{execution_id}.container.json").unlink()
+        subprocess.run(
+            ["docker", "rename", container_id, f"local-agent-{execution_id}"],
+            capture_output=True,
+            check=True,
+        )
+
+        manager = agent.executor.make_manager(lambda *_: None)
+        original_class_inspect = type(manager).inspect
+
+        async def scoped_inspect(self, name):
+            info = await original_class_inspect(self, name)
             if info is None:
-                info = await manager.inspect(legacy)
-            if info is None:
-                await original_release(execution_id)
-                return
-            container_id = info["Id"]
-
-        created_ids.append(container_id)
-        info = _inspect(container_id)
-        assert info is not None, f"Container {container_id} not found"
-
-        # Assert name
-        expected_name = f"local-agent-{manager.owner[:12]}-probe-{execution_id}"
-        actual_name = info.get("Name", "").lstrip("/")
-        assert actual_name == expected_name, f"Name mismatch: {actual_name} != {expected_name}"
-
-        # Assert labels
-        labels = info["Config"].get("Labels", {})
-        assert labels.get("local-agent.role") == "capability-probe"
-        assert labels.get("local-agent.mode") == "ephemeral"
-        assert labels.get("local-agent.run") == run_id
-        assert labels.get("local-agent.workspace") == workspace_id
-        assert labels.get("local-agent.execution") == execution_id
-
-        # Now exercise the variant
-        if variant == "missing_mapping":
-            # Delete ONLY that temp execution .container.json sidecar
-            mapping_path = store.control / "attempts" / (execution_id + ".container.json")
-            if mapping_path.exists():
-                mapping_path.unlink()
-        elif variant == "legacy_missing_mapping":
-            # Docker rename owned stopped container to legacy name, then delete sidecar
-            legacy_name = f"local-agent-{execution_id}"
-            _docker("rename", container_id, legacy_name)
-            mapping_path = store.control / "attempts" / (execution_id + ".container.json")
-            if mapping_path.exists():
-                mapping_path.unlink()
-        elif variant == "legacy_missing_labels":
-            # Temporarily mock inspect to remove owner and mode labels
-            from local_agent.executor.lifecycle import ExecutionManager
-            original_inspect = ExecutionManager.inspect
-
-            async def mock_inspect(self, cid):
-                info = await original_inspect(self, cid)
-                if info is None:
-                    return None
-                info = copy.deepcopy(info)
-                labels = info["Config"].get("Labels", {})
+                return None
+            copy = deepcopy(info)
+            if copy.get("Id") == container_id:
+                labels = copy.get("Config", {}).get("Labels", {})
                 labels.pop("local-agent.owner", None)
                 labels.pop("local-agent.mode", None)
-                info["Config"]["Labels"] = labels
-                return info
+            return copy
 
-            ExecutionManager.inspect = mock_inspect
+        with monkeypatch.context() as mp:
+            mp.setattr(type(manager), "inspect", scoped_inspect)
             try:
-                await original_release(execution_id)
+                return await original_release(execution_id)
             finally:
-                ExecutionManager.inspect = original_inspect
-            return
-        elif variant == "foreign_owner":
-            # Delete temp sidecar; mock inspect to return wrong owner
-            mapping_path = store.control / "attempts" / (execution_id + ".container.json")
-            if mapping_path.exists():
-                mapping_path.unlink()
-            from local_agent.executor.lifecycle import ExecutionManager
-            original_inspect = ExecutionManager.inspect
+                mp.undo()
 
-            async def mock_inspect_wrong_owner(self, cid):
-                info = await original_inspect(self, cid)
-                if info is None:
-                    return None
-                info = copy.deepcopy(info)
-                labels = info["Config"].get("Labels", {})
-                labels["local-agent.owner"] = "wrong-owner"
-                info["Config"]["Labels"] = labels
-                return info
+    agent.executor.release = wrapped_release
+    try:
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known
+        for container_id in known:
+            assert _docker_inspect(container_id) is None
+    finally:
+        store.close()
+        _force_remove(known)
 
-            ExecutionManager.inspect = mock_inspect_wrong_owner
+
+def test_probe_release_foreign_owner(tmp_path, request, monkeypatch):
+    image = request.config.getoption("--docker-image")
+    if image is None:
+        pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    root = tmp_path / "data"
+    source = tmp_path / "probe_source"
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
+
+    from local_agent.storage.database import Store
+
+    store = Store(root)
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
+        update={
+            "project_tests": False,
+            "window_tokens": 8192,
+            "output_reserve_tokens": 2048,
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
+        }
+    )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
+
+    original_release = agent.executor.release
+
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        (store.control / "attempts" / f"{execution_id}.container.json").unlink()
+
+        manager = agent.executor.make_manager(lambda *_: None)
+        original_class_inspect = type(manager).inspect
+
+        async def scoped_inspect(self, name):
+            info = await original_class_inspect(self, name)
+            if info is None:
+                return None
+            copy = deepcopy(info)
+            if copy.get("Id") == container_id:
+                labels = copy.get("Config", {}).get("Labels", {})
+                labels["local-agent.owner"] = "foreignowner0000"
+            return copy
+
+        with monkeypatch.context() as mp:
+            mp.setattr(type(manager), "inspect", scoped_inspect)
             try:
                 with pytest.raises(PermissionError):
                     await original_release(execution_id)
             finally:
-                ExecutionManager.inspect = original_inspect
-            # Container should still be present
-            assert _inspect(container_id) is not None
-            # Cleanup with original release (restore correct owner)
-            await original_release(execution_id)
-            return
-
-        # For normal, missing_mapping, legacy_missing_mapping: call original release
+                mp.undo()
+        assert _docker_inspect(container_id) is not None
         await original_release(execution_id)
 
-    executor.release = intercepting_release
-
+    agent.executor.release = wrapped_release
     try:
-        agent = Agent(store, probe_cfg, sandbox_meta, provider=ScriptedProvider(store.blobs, probe_cfg))
-        result = await agent.run(source, "Call read_file once with path project/probe.txt.", probe=True)
-        assert result["status"] == "completed_unverified"
-
-        # After Agent.run, assert no persistent workspace manifest
-        ws_manifest = store.control / "containers" / (workspace_id + ".json")
-        assert not ws_manifest.exists(), "Persistent workspace manifest should not exist for probe"
-
-        # Every created probe container should be removed
-        for cid in created_ids:
-            assert _inspect(cid) is None, f"Container {cid} should be removed"
-
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known
     finally:
-        # Emergency cleanup: remove any known owned temp IDs
-        for cid in created_ids:
-            _remove(cid)
         store.close()
+        _force_remove(known)
 
 
-async def test_persistent_task_uses_same_container(tmp_path, request):
-    """A persistent task should reuse the same container across executions."""
+def test_probe_release_foreign_mode(tmp_path, request, monkeypatch):
     image = request.config.getoption("--docker-image")
     if image is None:
         pytest.skip("Docker acceptance requires --docker-image sha256:...")
+    root = tmp_path / "data"
+    source = tmp_path / "probe_source"
+    source.mkdir(parents=True)
+    (source / "probe.txt").write_text(MARKER + "\n")
 
-    from local_agent.contracts import ExecutionSettings
+    from local_agent.storage.database import Store
 
-    store = _make_store(tmp_path)
-    workspaces = Workspaces(store.root)
+    store = Store(root)
+    parent = load_config(Path("config/coder.yaml"))
+    parent = parent.model_copy(
+        update={
+            "project_tests": False,
+            "window_tokens": 8192,
+            "output_reserve_tokens": 2048,
+            "execution": parent.execution.model_copy(
+                update={"execution_mode_default": "persistent"}
+            ),
+        }
+    )
+    probe_config = _probe_config(parent)
+    sandbox = {**sandbox_config(), "image": image}
+    provider = ScriptedProvider(responses=_probe_responses())
+    agent = Agent(store, probe_config, sandbox, provider=provider)
+    known = []
 
-    # Use the existing fixture source (broken_repo contains calculator.py)
-    source = Path(__file__).parent / "fixtures" / "broken_repo"
-    workspace_id, path = workspaces.create(source)
+    original_release = agent.executor.release
 
-    settings = ExecutionSettings(execution_mode_default="persistent")
-    executor = DockerExecutor(store, workspaces, image, settings=settings)
+    async def wrapped_release(execution_id):
+        mapping = agent.executor.mapping(execution_id)
+        if mapping is None:
+            return await original_release(execution_id)
+        container_id = mapping["container_id"]
+        known.append(container_id)
+        (store.control / "attempts" / f"{execution_id}.container.json").unlink()
 
-    from local_agent.contracts import ExecutionRequest
-    from local_agent.observability.spans import correlation
+        manager = agent.executor.make_manager(lambda *_: None)
+        original_class_inspect = type(manager).inspect
 
-    ctx = correlation()
+        async def scoped_inspect(self, name):
+            info = await original_class_inspect(self, name)
+            if info is None:
+                return None
+            copy = deepcopy(info)
+            if copy.get("Id") == container_id:
+                labels = copy.get("Config", {}).get("Labels", {})
+                labels["local-agent.mode"] = "persistent"
+            return copy
 
-    async def execute_tool(name, arguments):
-        # Create a minimal execution request
-        run_id = new_id("run")
-        from local_agent.contracts import RunManifest
-        from local_agent.storage.blobs import digest
+        with monkeypatch.context() as mp:
+            mp.setattr(type(manager), "inspect", scoped_inspect)
+            try:
+                with pytest.raises(PermissionError):
+                    await original_release(execution_id)
+            finally:
+                mp.undo()
+        assert _docker_inspect(container_id) is not None
+        await original_release(execution_id)
 
-        config_ref = store.blobs.put_json({"policy": "offline", "policy_hash": "h"})
-        store.create_run(
-            RunManifest(
-                run_id=run_id,
-                thread_id=new_id("thread"),
-                workspace_id=workspace_id,
-                config_ref=config_ref,
-                config_hash=digest(store.blobs.read(config_ref)),
-                model_identity="scripted-persistent",
-                sandbox_image_digest=image,
-                mode="live",
-                package_versions={},
-            )
-        )
-        store.transition(run_id, "running")
-
-        execution = ExecutionRequest(
-            execution_id=new_id("exec"),
-            call_id=new_id("call"),
-            workspace_id=workspace_id,
-            tool=name,
-            tool_version="1",
-            arguments=arguments,
-            effective_limits={},
-            authorization_ref=new_id("auth"),
-            normalized_request_hash="h",
-            trace_id=ctx["trace_id"],
-            parent_span_id=ctx["span_id"],
-        )
-        result = await executor.execute(execution)
-        return result, execution.execution_id
-
+    agent.executor.release = wrapped_release
     try:
-        result1, exec1 = await execute_tool("read_file", {"path": "project/calculator.py"})
-        result2, exec2 = await execute_tool("read_file", {"path": "project/calculator.py"})
-
-        # Both should succeed
-        assert result1["status"] == "completed"
-        assert result2["status"] == "completed"
-
-        # Inspect the keeper: same container ID for both
-        mapping1 = executor.mapping(exec1)
-        mapping2 = executor.mapping(exec2)
-        assert mapping1 is not None
-        assert mapping2 is not None
-        assert mapping1["container_id"] == mapping2["container_id"], "Persistent task should reuse same container"
-
-        container_id = mapping1["container_id"]
-        info = _inspect(container_id)
-        assert info is not None
-        labels = info["Config"].get("Labels", {})
-        assert labels.get("local-agent.role") == "task"
-        assert labels.get("local-agent.mode") == "persistent"
-
-        # Name should match manager.container_name(workspace_id)
-        from local_agent.executor.lifecycle import ExecutionManager
-        manager = executor.make_manager(lambda *a: None)
-        expected_name = manager.container_name(workspace_id)
-        actual_name = info.get("Name", "").lstrip("/")
-        assert actual_name == expected_name, f"Name mismatch: {actual_name} != {expected_name}"
-
+        result = asyncio.run(agent.run(source, "Probe", probe=True))
+        assert result["status"] == "completed_unverified", f"probe result: {result}"
+        assert known
     finally:
-        # Stop the persistent container before store closes
-        from local_agent.executor.lifecycle import ExecutionManager
-        manager = executor.make_manager(lambda *a: None)
-        try:
-            await manager.stop(workspace_id)
-        except Exception:
-            pass
         store.close()
+        _force_remove(known)
 
 
-if __name__ == "__main__":
-    import sys
+def test_persistent_execution(sandbox):
+    executor = DockerExecutor(
+        sandbox.store,
+        sandbox.workspaces,
+        sandbox.executor.image,
+        settings=ExecutionSettings(execution_mode_default="persistent"),
+    )
+    sandbox.executor = executor
 
-    sys.exit(pytest.main([__file__, "-v"]))
+    async def scenario():
+        manager = executor.make_manager(
+            lambda kind, data: sandbox.store.append(sandbox.run_id, kind, "test", data)
+        )
+        try:
+            first = await sandbox.execute("read_file", {"path": "project/calculator.py"})
+            second = await sandbox.execute("read_file", {"path": "project/calculator.py"})
+            assert first.status == "succeeded"
+            assert second.status == "succeeded"
+            assert first.container_id == second.container_id
+            info = await manager.inspect(first.container_id)
+            assert info is not None
+            labels = info.get("Config", {}).get("Labels", {})
+            assert labels.get("local-agent.role") == "task"
+            assert labels.get("local-agent.mode") == "persistent"
+            assert info["Name"].lstrip("/") == manager.container_name(sandbox.workspace_id)
+        finally:
+            await manager.stop(sandbox.workspace_id)
+
+    asyncio.run(scenario())
