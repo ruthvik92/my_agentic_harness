@@ -78,3 +78,21 @@ def test_browser_uses_durable_runtime_and_audits(tmp_path, request):
         assert len(tool_images(store, result["run_id"])) == 1
     finally:
         store.close()
+
+
+def test_coding_browser_keeps_tool_guidance_despite_screenshot_override():
+    from types import SimpleNamespace
+
+    from local_agent.tools.guidance import GUIDE
+
+    agent = object.__new__(BrowserAgent)
+    agent.config = load_config(Path("config/coder.yaml"))
+    agent.instructions = "Coding instructions"
+    agent.working_directory = "."
+    agent.test_plan = None
+    agent.store = SimpleNamespace(blobs=SimpleNamespace(json=lambda _: []))
+    agent.prepared = lambda: {"history_ref": "history", "image_ref": None}
+    messages = agent.fixed_messages("Fix CRLF")
+    assert any(m["role"] == "system" and m["content"] == GUIDE for m in messages)
+    assert any("Task working directory: project" in m.get("content", "") for m in messages)
+    assert not any("no filesystem or command tools" in m.get("content", "") for m in messages)

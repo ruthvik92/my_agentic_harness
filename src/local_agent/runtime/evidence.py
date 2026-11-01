@@ -7,6 +7,10 @@ from local_agent.storage.blobs import canonical
 
 
 def allowed(store, run_id, ref):
+    if any(e.event_type in {"environment.command_finished", "environment.command_output"}
+           and ref in {e.data.get("stdout_ref"), e.data.get("stderr_ref"), e.data.get("output_ref")}
+           for e in store.events(run_id)):
+        return True
     rows = store.db.execute(
         "SELECT e.result_ref FROM execution_attempts e JOIN tool_calls t ON t.id=e.call_id "
         "JOIN model_requests m ON m.id=t.request_id WHERE m.run_id=? AND e.state='finished'",

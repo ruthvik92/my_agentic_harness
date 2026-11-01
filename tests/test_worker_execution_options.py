@@ -14,12 +14,12 @@ from local_agent.executor import worker
 
 def test_defaults_when_none():
     result = worker.validate_execution_options(None)
-    assert result == {"memory_mb": 4096, "cpu_cores": 4, "environment": {}}
+    assert result == {"memory_mb": 4096, "cpu_cores": 4, "pids_limit": 128, "environment": {}}
 
 
 def test_defaults_when_empty_dict():
     result = worker.validate_execution_options({})
-    assert result == {"memory_mb": 4096, "cpu_cores": 4, "environment": {}}
+    assert result == {"memory_mb": 4096, "cpu_cores": 4, "pids_limit": 128, "environment": {}}
 
 
 def test_valid_full_options():

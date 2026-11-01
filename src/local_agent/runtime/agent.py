@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections import Counter
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from local_agent.runtime.image_messages import image_messages
 from local_agent.runtime.tool_results import result_preview
 from local_agent.storage.blobs import canonical, digest, private_directory
 from local_agent.storage.database import AuditUnavailable
+from local_agent.tools.guidance import GUIDE, correction
 from local_agent.tools.registry import VERSIONS, normalize
 from local_agent.workspace.manager import IMPORT_EXCLUDES, Workspaces, copy_tree
 
@@ -61,18 +63,39 @@ class RunCancelled(RuntimeError):
 
 class Agent:
     def __init__(
-        self, store, config, sandbox, *, provider=None, capability_report=None, fault_hook=None,
+        self,
+        store,
+        config,
+        sandbox,
+        *,
+        provider=None,
+        capability_report=None,
+        fault_hook=None,
         workspace_options=None,
+        progress_path=None,
+        expected_workspace=None,
+        expected_attempt=None,
     ):
         self.store, self.config, self.sandbox = store, config, sandbox
+        self.base_sandbox = sandbox
+        self.progress_path = progress_path
+        self.expected_workspace = expected_workspace
+        self.expected_attempt = expected_attempt
+        self.test_plan = None
+        self.test_retries = 0
+        self.project_test_report = None
+        self.environment_inventory = None
         self.workspaces = Workspaces(store.root)
         self.provider = provider or create_provider(store.blobs, config)
-        self.executor = DockerExecutor(store, self.workspaces, sandbox["image"], settings=config.execution)
+        self.executor = DockerExecutor(
+            store, self.workspaces, sandbox["image"], settings=config.execution
+        )
         self.spans = Spans()
         self.context = ContextBuilder(store.blobs, config)
         self.turns = self.attempted = 0
         self.groups = []
         self.failures = Counter()
+        self.policy_hash = OFFLINE_HASH
         self.run_id = new_id("run")
         self.last = None
         self.deadline = time.monotonic() + config.limits.run_timeout_seconds
@@ -105,7 +128,9 @@ class Agent:
                 )
                 if hasattr(self, "workspace_id"):
                     result["working_directory"] = self.working_directory
-                    result["task_mode"] = "continue" if self.workspace_options.get("continue_workspace_id") else "new"
+                    result["task_mode"] = (
+                        "continue" if self.workspace_options.get("continue_workspace_id") else "new"
+                    )
                     git_workspace = self.workspaces.git_info(self.workspace_id)
                     if git_workspace:
                         result["git_workspace"] = git_workspace
@@ -120,20 +145,81 @@ class Agent:
     async def prepare(self):
         pass
 
+    def check_paid_budget(self, snapshot):
+        if self.config.provider != "openai" or self.config.paid_token_limit is None:
+            return
+        used = 0
+        for row in self.store.db.execute("SELECT request_ref,response_ref FROM model_requests WHERE run_id=?", (self.run_id,)):
+            if self.store.blobs.json(row[0]).get("provider") != "openai":
+                continue
+            if row[1] is None:
+                raise BudgetExhausted("Paid usage is unknown after an incomplete request; automatic paid retry stopped")
+            response = self.store.blobs.json(row[1])
+            usage = response.get("usage") or {}
+            inp = usage.get("prompt_tokens", usage.get("input_tokens"))
+            out = usage.get("completion_tokens", usage.get("output_tokens"))
+            if type(inp) is not int or type(out) is not int or inp < 0 or out < 0:
+                raise BudgetExhausted("Paid usage is unknown; automatic paid calls stopped")
+            used += inp + out
+        if used + snapshot.token_estimate + self.config.output_reserve_tokens > self.config.paid_token_limit:
+            raise BudgetExhausted("Paid token allowance cannot cover the next request and reserved output")
+
+    @asynccontextmanager
+    async def frozen_workspace(self, workspace_id=None):
+        from local_agent.executor.maintenance import cleanup_attestor
+
+        manager = self.executor.make_manager(lambda *_: None)
+        manager.attest = cleanup_attestor(self.store, self.workspaces)
+        async with manager.snapshot(workspace_id or self.workspace_id):
+            yield
+
+    async def before_model(self):
+        """Subclass controller checks at a completed-exchange boundary."""
+
     def fixed_messages(self, task):
         messages = [{"role": "system", "content": self.instructions}]
         if self.config.instructions_version.startswith("coder-"):
             messages.append(self.directory_message())
+            messages.append({"role": "system", "content": GUIDE})
+            if "prepare_environment" in self.config.tools:
+                messages.append({"role": "system", "content":
+                    "Inspect the environment inventory before execution. Request missing tooling with "
+                    "prepare_environment instead of repeatedly importing missing packages. Preparation "
+                    "restarts processes and preserves project files; execution stays offline. A response "
+                    "with status environment_blocked is a setup limitation, not a passing test. "
+                    "Do not repeat unchanged failed requests. Installed inventory: "
+                    + canonical(self.environment_inventory or {"status": "not probed"}).decode()})
+        if self.test_plan is not None:
+            if self.project_test_report and self.project_test_report.get("status") == "environment_blocked":
+                messages.append({"role": "system", "content":
+                    "Automatic test environment preparation was blocked: "
+                    + str(self.project_test_report.get("error", "unknown setup error"))
+                    + ". Inspect requirements and request a suitable environment before implementation."})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Use test-driven development: write regression tests first, run them to demonstrate failure, then implement and rerun. Run the shared offline test plan with run_command argv=['python','/workspace/tools/test_project.py']. The controller independently reruns it before completion. Plan: "
+                    + canonical(self.test_plan).decode(),
+                }
+            )
+        from local_agent.runtime.capability_failures import fixed_context
+
+        capability_context = fixed_context(self) if self.created else None
+        if capability_context:
+            messages.append(capability_context)
         return [*messages, {"role": "user", "content": task}]
 
     def directory_message(self):
         prefix = "project" if self.working_directory == "." else "project/" + self.working_directory
-        return {"role": "system", "content": (
-            f"Task working directory: {prefix}. Start by listing this directory. "
-            "For files named in the task, use this directory as the base. File tool paths "
-            "remain workspace-relative: include the full prefix above. Commands and git_diff "
-            "default to this directory when cwd is omitted. This is task focus, not a permission boundary."
-        )}
+        return {
+            "role": "system",
+            "content": (
+                f"Task working directory: {prefix}. Start by listing this directory. "
+                "For files named in the task, use this directory as the base. File tool paths "
+                "remain workspace-relative: include the full prefix above. Commands and git_diff "
+                "default to this directory when cwd is omitted. This is task focus, not a permission boundary."
+            ),
+        }
 
     async def complete(self, answer, verify_fixture):
         row = self.store.db.execute(
@@ -159,6 +245,75 @@ class Agent:
                 )
                 self.checkpoint()
                 return None
+        if self.test_plan is not None:
+            from local_agent.testing.checks import changed_files, run_checks
+            from local_agent.testing.plans import resolve, seal
+
+            plan = (
+                resolve(self.path / "project", self.working_directory, discover_contract=False)
+                if self.test_plan["origin"] == "automatic Python detection"
+                else dict(self.test_plan)
+            )
+            changes = changed_files(self.path / "project", self.baseline)
+            changed_tests = [
+                name
+                for name in changes
+                if Path(name).name.startswith("test_")
+                and name.endswith(".py")
+                and (self.path / "project" / name).is_file()
+            ]
+            if (
+                plan["origin"] == "automatic Python detection"
+                and changed_tests
+                and self.working_directory == "."
+            ):
+                plan["commands"].append(
+                    {"argv": ["python", "-m", "pytest", "-q", *changed_tests], "cwd": "."}
+                )
+            plan = seal(plan)
+            try:
+                report, _, _ = await run_checks(
+                    self.store,
+                    self.config,
+                    self.path / "project",
+                    plan,
+                    self.sandbox,
+                    locked=True,
+                )
+            except (RuntimeError, ValueError) as exc:
+                report = {
+                    "status": "environment_blocked",
+                    "error": str(exc),
+                    "commands": [],
+                    "plan": plan,
+                }
+            code_changed = any(
+                name.endswith(".py") and not Path(name).name.startswith("test_") for name in changes
+            )
+            if code_changed and not changed_tests and report["status"] == "passed":
+                report["status"] = "tests_required"
+                report["error"] = "Add regression tests for the implementation changes."
+            self.project_test_report = report
+            self.event(
+                "project.tests", "controller", {"report_ref": self.store.blobs.put_json(report)}
+            )
+            if (
+                report["status"] != "passed"
+                and self.test_retries < 2
+                and self.turns < self.config.limits.max_model_turns
+            ):
+                self.test_retries += 1
+                self.groups.append(
+                    [
+                        {
+                            "role": "user",
+                            "content": "Controller test plan failed. Follow test-driven development: add regression tests, reproduce the failure, then repair implementation. Actual evidence: "
+                            + canonical(report).decode()[:12000],
+                        }
+                    ]
+                )
+                self.checkpoint()
+                return None
         diff_ref = await self.final_diff()
         if self.workspaces.git_info(self.workspace_id):
             from local_agent.workspace.git import GitWorktrees
@@ -175,6 +330,13 @@ class Agent:
             "answer": answer,
             "workspace": str(self.path),
             "diff_ref": diff_ref,
+            **({"repair_progress": self.repair_guard.public()}
+               if getattr(self, "repair_guard", None) else {}),
+            **(
+                {"project_tests": self.project_test_report}
+                if self.project_test_report is not None
+                else {}
+            ),
         }
 
     def cached_trusted(self, purpose):
@@ -212,16 +374,20 @@ class Agent:
         ):
             raise RunCancelled("cancellation requested")
         if time.monotonic() >= self.deadline:
-            raise BudgetExhausted("run deadline")
+            raise BudgetExhausted(f"Run time limit reached ({self.config.limits.run_timeout_seconds} seconds)")
         if model and self.turns >= self.config.limits.max_model_turns:
-            raise BudgetExhausted("model turns")
+            raise BudgetExhausted(f"Model-turn limit reached: {self.turns}/{self.config.limits.max_model_turns} model requests; the agent did not complete within this budget")
         if call and self.attempted >= self.config.limits.max_attempted_tool_calls:
-            raise BudgetExhausted("attempted tools")
+            raise BudgetExhausted(f"Tool-call limit reached: {self.attempted}/{self.config.limits.max_attempted_tool_calls} attempted calls")
 
     def event(self, kind, actor, data):
         self.last = self.store.append(
             self.run_id, kind, actor, data, causes=(self.last.event_id,) if self.last else ()
         )
+        if self.progress_path is not None and self.created:
+            from local_agent.executor.lifecycle import publish
+
+            publish(Path(self.progress_path), {"run_id": self.run_id, "phase": kind})
         return self.last
 
     def request(
@@ -317,6 +483,7 @@ class Agent:
                     arguments,
                     version=call.tool_version,
                     legacy_evidence=legacy,
+                    pids_limit=self.config.execution.container_pids_limit,
                 )
                 error = None
             except ValueError as exc:
@@ -339,14 +506,15 @@ class Agent:
             key = digest(canonical({"name": call.name, "arguments_ref": call.arguments_ref}))
             self.failures[key] += 1
             if self.failures[key] >= self.config.limits.max_identical_failures:
-                raise BudgetExhausted("three identical schema rejections")
-            return {"error": "validation", "detail": error}, None
+                raise BudgetExhausted("three identical schema rejections: " + call.name + " — " + correction(call.name, arguments, error))
+            return {"error": "validation", "detail": error, "correction": correction(call.name, arguments, error)}, None
         with self.spans.boundary("policy.evaluate"):
             decision = offline_evaluate(
                 call.call_id,
                 normalized,
                 self.store.blobs.put_json(normalized),
                 (call.name,) if trusted else self.config.tools,
+                policy_hash=self.policy_hash,
             )
             if call.name == "read_file" and normalized["arguments"].get("evidence_ref") is not None:
                 from local_agent.runtime.evidence import allowed
@@ -369,6 +537,19 @@ class Agent:
             ):
                 raise BudgetExhausted("three identical policy denials")
             return {"error": "policy_denied", "detail": decision.reason}, None
+        if call.name == "run_command" and not trusted:
+            from local_agent.runtime.capability_failures import cached
+
+            fact = cached(self, normalized["arguments"])
+            if fact:
+                preview = {"status": "environment_blocked", "executed": False,
+                           "error": "unchanged_unavailable_capability", "failure": fact["failure"],
+                           "evidence_ref": fact["output_ref"], "correction": fact["correction"]}
+                self.event("tool.skipped", "controller", {
+                    "skipped_call_ids": [call.call_id], "reason": "unchanged_unavailable_capability",
+                    "preview_ref": self.store.blobs.put_json(preview),
+                })
+                return preview, None
         with self.spans.boundary("tool.execute"):
             ctx = correlation()
             execution = ExecutionRequest(
@@ -379,6 +560,7 @@ class Agent:
                 tool=call.name,
                 tool_version=call.tool_version,
                 arguments=normalized["arguments"],
+                effective_limits=normalized["effective_limits"],
                 authorization_ref=decision.decision_id,
                 normalized_request_hash=decision.normalized_request_hash,
                 trace_id=ctx["trace_id"],
@@ -394,7 +576,11 @@ class Agent:
             self.last = self.store.execution_event(
                 self.run_id, execution.execution_id, causes=(self.last.event_id,)
             )
-            if call.name == "read_file" and execution.arguments.get("evidence_ref"):
+            if call.name in {"environment_inventory", "prepare_environment"}:
+                from local_agent.environments.service import execute as environment_execute
+
+                result = await environment_execute(self, execution)
+            elif call.name == "read_file" and execution.arguments.get("evidence_ref"):
                 from local_agent.runtime.evidence import execute as read_evidence
 
                 result = read_evidence(self.store, self.run_id, execution)
@@ -410,15 +596,58 @@ class Agent:
                 self.run_id, execution.execution_id, result, causes=(self.last.event_id,)
             )
             self.fault("after_result_commit")
-            await self.executor.release(execution.execution_id)
+            if call.name not in {"environment_inventory", "prepare_environment"}:
+                await self.executor.release(execution.execution_id)
             preview = result_preview(self.store, result, call.name)
+            preparation_ready = (call.name == "prepare_environment" and result.output_ref
+                                 and self.store.blobs.json(result.output_ref).get("status") == "ready")
+            if result.status == "succeeded" and (call.name in {"write_file", "patch_file", "execute_tool"} or preparation_ready):
+                from local_agent.runtime.capability_failures import invalidate
+
+                invalidate(self, "successful tool may have changed workspace dependencies")
+            if (not trusted and result.status == "succeeded" and call.name in {"write_file", "patch_file"}
+                    and str(arguments.get("path", "")).startswith("project/")):
+                try:
+                    change = json.loads(result.preview)
+                    if change.get("content_hash") and change["content_hash"] != change.get("previous_hash"):
+                        # A new code state deserves a new reproduction attempt. Unchanged
+                        # writes and failed edits never reset the repeated-failure guard.
+                        self.failures.clear()
+                except (ValueError, TypeError):
+                    pass
+            if call.name == "run_command" and not trusted:
+                from local_agent.runtime.capability_failures import diagnose, guidance, record
+
+                output = result.preview
+                if result.output_ref:
+                    output = self.store.blobs.read(result.output_ref)[:65536].decode("utf-8", errors="replace")
+                failure = diagnose(result.status, result.exit_code, output, result.error)
+                record(self, normalized["arguments"], result, failure)
+                if failure["kind"] != "none":
+                    preview["failure"] = failure
+                    preview["correction"] = guidance(failure, self.environment_inventory)
+            elif result.status != "succeeded" and not trusted:
+                preview["correction"] = correction(call.name, arguments, str(preview))
             if result.status != "succeeded":
                 self.failures[decision.normalized_request_hash] += 1
                 if (
                     self.failures[decision.normalized_request_hash]
                     >= self.config.limits.max_identical_failures
                 ):
-                    raise BudgetExhausted("three identical failed actions")
+                    detail = ""
+                    if result.status == "process_limit":
+                        detail = ": " + result.error
+                    if call.name in {"patch_file", "write_file", "read_file"}:
+                        try:
+                            error = json.loads(preview.get("preview", ""))
+                            detail = ": " + str(error.get("detail", error.get("error", "")))[:300]
+                        except (ValueError, TypeError):
+                            pass
+                    raise BudgetExhausted(
+                        "three identical failed actions: " + call.name
+                        + (" for " + str(arguments["path"]) if "path" in arguments else "")
+                        + detail
+                    )
             return preview, result
 
     async def trusted(self, name, arguments, purpose, workspace_id=None, grant_ref=None):
@@ -505,7 +734,7 @@ class Agent:
             copy_tree(
                 self.path / "project",
                 root / "scratch" / "candidate",
-                exclude=(".git", ".pytest_cache", "__pycache__"),
+                exclude=IMPORT_EXCLUDES,
             )
             grant = self.grant(workspace_id, "final_diff")
             _, result = await self.trusted(
@@ -552,6 +781,7 @@ class Agent:
         self.last = self.store.checkpoint(checkpoint, causes=(self.last.event_id,))
 
     async def _run(self, source, task, *, verify_fixture=False, probe=False, resume_run_id=None):
+        snapshot_guard = AsyncExitStack()
         if resume_run_id:
             self.run_id = resume_run_id
         self.store.blobs.begin_budget(self.config.limits.max_evidence_bytes)
@@ -574,8 +804,15 @@ class Agent:
                             record = worktrees.load(previous)
                             if not record:
                                 raise ValueError("Unknown managed Git workspace")
+                            if self.expected_attempt is not None and any(
+                                record.get(key) != self.expected_attempt.get(key)
+                                for key in ("workspace_id", "run_id", "candidate_commit", "repository")
+                            ):
+                                raise ValueError("Workspace changed while the continuation was queued; refresh before continuing")
                             if self.store.run(record["run_id"])["status"] not in TERMINAL:
-                                raise ValueError("Previous task is active; stop or finish it before continuing")
+                                raise ValueError(
+                                    "Previous task is active; stop or finish it before continuing"
+                                )
                             pending = self.store.db.execute(
                                 "SELECT 1 FROM execution_attempts e JOIN tool_calls t ON t.id=e.call_id "
                                 "JOIN model_requests m ON m.id=t.request_id "
@@ -583,27 +820,69 @@ class Agent:
                                 (record["run_id"],),
                             ).fetchone()
                             if pending:
-                                raise ValueError("Previous task has unresolved executions; reconcile it first")
+                                raise ValueError(
+                                    "Previous task has unresolved executions; reconcile it first"
+                                )
                             if Path(record["repository"]).resolve() != source.resolve(strict=True):
-                                raise ValueError("Workspace belongs to a different source repository")
+                                raise ValueError(
+                                    "Workspace belongs to a different source repository"
+                                )
                             worktrees.verify(record)
+                            from local_agent.environments.service import selected
+
+                            inherited = selected(self.store, record["run_id"])
+                            if inherited.get("prepared_environment"):
+                                if (self.config.execution.container_pids_limit != 128
+                                        and inherited.get("worker_hash") != self.sandbox.get("worker_hash")):
+                                    raise ValueError(
+                                        "Selected prepared image uses an older sandbox worker. "
+                                        "Continue with container_pids_limit: 128, or start a new task "
+                                        "from this workspace's commit and prepare its environment with the current worker."
+                                    )
+                                self.sandbox = self.base_sandbox = inherited
+                                self.executor = DockerExecutor(self.store, self.workspaces,
+                                    inherited["image"], settings=self.config.execution)
+                                self.executor.fault_hook = self.fault
+                                self.environment_inventory = inherited["prepared_environment"].get("inventory")
+                            if self.expected_workspace is not None:
+                                from local_agent.mobile.repair_controls import (
+                                    validate_repair_target,
+                                )
+
+                                if previous != self.expected_workspace["workspace_id"]:
+                                    raise ValueError("Repair workspace changed")
+                                validate_repair_target(self.store.root, self.expected_workspace, source)
                             # Quiesce any retained keeper before capturing the next task's state.
-                            container_record = self.store.control / "containers" / (previous + ".json")
-                            if container_record.exists():
+                            container_record = (
+                                self.store.control / "containers" / (previous + ".json")
+                            )
+                            if container_record.exists() and self.config.execution.execution_mode_default == "ephemeral":
                                 from local_agent.executor.maintenance import sweep
 
-                                await sweep(self.store.root, self.sandbox["image"], self.config.execution,
-                                            workspace_id=previous)
+                                await sweep(
+                                    self.store.root,
+                                    self.sandbox["image"],
+                                    self.config.execution,
+                                    workspace_id=previous,
+                                )
+                            else:
+                                await snapshot_guard.enter_async_context(self.frozen_workspace(previous))
                             self.working_directory = self.workspace_options.get(
                                 "working_directory", record.get("working_directory", ".")
                             )
                             check_directory(Path(record["worktree"]), self.working_directory)
-                            worktrees.continue_task(previous, source, self.run_id,
-                                                    working_directory=self.working_directory)
+                            worktrees.continue_task(
+                                previous,
+                                source,
+                                self.run_id,
+                                working_directory=self.working_directory,
+                            )
                             self.workspace_id, self.path = previous, self.workspaces.path(previous)
                         else:
                             self.workspace_id, self.path = self.workspaces.create_coding(
-                                source, self.run_id, base_ref=self.workspace_options.get("base_ref", "HEAD")
+                                source,
+                                self.run_id,
+                                base_ref=self.workspace_options.get("base_ref", "HEAD"),
                             )
                             check_directory(self.path / "project", self.working_directory)
                             record = worktrees.load(self.workspace_id)
@@ -622,6 +901,36 @@ class Agent:
                         GitWorktrees(self.workspaces).baseline(self.workspace_id, self.baseline)
                     else:
                         copy_tree(self.path / "project", self.baseline, exclude=IMPORT_EXCLUDES)
+                    if (
+                        self.config.project_tests
+                        and not probe
+                        and not verify_fixture
+                        and self.config.instructions_version.startswith("coder-")
+                    ):
+                        from local_agent.testing.environment import prepare_environment
+                        from local_agent.testing.plans import resolve
+
+                        self.test_plan = resolve(self.path / "project", self.working_directory)
+                        try:
+                            self.sandbox = await prepare_environment(
+                                self.store.root,
+                                self.path / "project",
+                                self.test_plan,
+                                self.base_sandbox,
+                            )
+                            self.executor = DockerExecutor(
+                                self.store,
+                                self.workspaces,
+                                self.sandbox["image"],
+                                settings=self.config.execution,
+                            )
+                        except (RuntimeError, ValueError, OSError) as exc:
+                            self.project_test_report = {
+                                "status": "environment_blocked",
+                                "error": str(exc),
+                                "commands": [],
+                                "plan": self.test_plan,
+                            }
                     config_ref = self.store.blobs.put_json(
                         {
                             "agent": self.config.model_dump(mode="json"),
@@ -636,7 +945,11 @@ class Agent:
                             "probe": probe,
                             "git_workspace": self.workspaces.git_info(self.workspace_id),
                             "workspace_options": self.workspace_options,
+                            "expected_workspace": self.expected_workspace,
+                            "expected_attempt": self.expected_attempt,
                             "working_directory": self.working_directory,
+                            "project_test_plan": self.test_plan,
+                            "base_sandbox": self.base_sandbox,
                             "baseline_id": self.run_id,
                         }
                     )
@@ -645,7 +958,9 @@ class Agent:
                             run_id=self.run_id,
                             thread_id=new_id("thread"),
                             workspace_id=self.workspace_id,
-                            source_revision=(self.workspaces.git_info(self.workspace_id) or {}).get("base_commit"),
+                            source_revision=(self.workspaces.git_info(self.workspace_id) or {}).get(
+                                "base_commit"
+                            ),
                             config_ref=config_ref,
                             config_hash=digest(self.store.blobs.read(config_ref)),
                             model_identity=metadata.get("installed", {}).get(
@@ -672,11 +987,25 @@ class Agent:
                             else None,
                         },
                     )
+                    if (
+                        self.project_test_report
+                        and self.project_test_report["status"] == "environment_blocked"
+                    ):
+                        self.event(
+                            "project.tests",
+                            "controller",
+                            {"report_ref": self.store.blobs.put_json(self.project_test_report)},
+                        )
+                        if "prepare_environment" not in self.config.tools:
+                            raise RuntimeError(
+                                "Test environment blocked: " + self.project_test_report["error"]
+                            )
                     _, bootstrap = await self.trusted(
                         "run_command", {"argv": ["python", "-I", "-c", BOOTSTRAP]}, "bootstrap"
                     )
                     if bootstrap is None or bootstrap.status != "succeeded":
                         raise RuntimeError("sandbox baseline initialization failed")
+                    await snapshot_guard.aclose()
                 else:
                     from local_agent.runtime.recovery import restore
 
@@ -684,19 +1013,48 @@ class Agent:
                     task = restored["task"]
                     verify_fixture = restored["verify_fixture"]
                     self.instructions = restored["instructions"]
+                from local_agent.environments.browser_support import stage as stage_browser_runner
+
+                stage_browser_runner(self)
+                node_roots = self.sandbox.get("prepared_environment", {}).get("node_roots")
+                if node_roots and resume_run_id is None:
+                    from local_agent.environments.service import HYDRATE
+
+                    _, hydrated = await self.trusted("run_command", {
+                        "argv": ["python", "-I", "-c", HYDRATE, json.dumps(node_roots)],
+                    }, "environment_hydrate")
+                    if hydrated is None or hydrated.status != "succeeded":
+                        raise RuntimeError("Prepared npm dependencies could not be copied into the workspace")
+                if "environment_inventory" in self.config.tools:
+                    await self.trusted("environment_inventory", {}, "environment_inventory")
                 self.verifier = verify_fixture if isinstance(verify_fixture, str) else "calculator"
                 if resume_run_id is None:
                     await self.prepare()
+                if self.test_plan is not None:
+                    from local_agent.testing.runner import RUNNER
+
+                    helper = (
+                        "import sys\n"
+                        + "sys.argv=['test_project',"
+                        + repr(json.dumps(self.test_plan))
+                        + "]\n"
+                        + RUNNER
+                    )
+                    (self.path / "tools/test_project.py").write_text(helper)
                 fixed = self.fixed_messages(task)
                 while True:
                     if self.restored_completion is not None:
                         answer = self.restored_completion
                         self.restored_completion = None
-                        completed = await self.complete(answer, verify_fixture)
+                        async with self.frozen_workspace():
+                            completed = await self.complete(answer, verify_fixture)
                         if completed is not None:
                             return completed
+                    await self.before_model()
                     self.check(model=True)
                     with self.spans.boundary("context.build"):
+                        # An environment tool can update the image/inventory during a run.
+                        fixed = self.fixed_messages(task)
                         snapshot, ref = self.context.build(fixed, self.groups)
                         if snapshot.exclusions:
                             self.event(
@@ -712,6 +1070,7 @@ class Agent:
                             )
                         self.event("context.built", "context", {"snapshot_ref": ref})
                     with self.spans.boundary("model.generate"):
+                        self.check_paid_budget(snapshot)
                         request = self.request(ref)
                         self.turns += 1
                         try:
@@ -742,6 +1101,23 @@ class Agent:
                                     "response_ref": getattr(exc, "raw_ref", None),
                                 },
                             )
+                            prior_repair = any(
+                                e.event_type == "retry.decided" and e.data.get("rule") == "local-tool-response-repair-v1"
+                                for e in self.store.events(self.run_id)
+                            )
+                            if (self.config.provider == "ollama" and self.config.tools
+                                    and getattr(exc, "recoverable_tool_error", False)
+                                    and not prior_repair):
+                                self.event("retry.decided", "runtime", {
+                                    "prior_request_id": request.request_id,
+                                    "selected_action": "one_corrected_local_response",
+                                    "rule": "local-tool-response-repair-v1"})
+                                self.groups.append([{"role": "user", "content":
+                                    "Controller feedback: the preceding model response could not be parsed or exceeded its output limit. No tool calls from it were dispatched. "
+                                    "Produce exactly one small tool call with complete valid JSON. Do not repeat a large batch or rewrite whole files; prefer a small exact patch. "
+                                    "The same model-turn/time limits still apply. Error: " + str(exc)[:1200]}])
+                                self.checkpoint()
+                                continue
                             raise
                         response, calls, proposals = self.response(request, returned)
                         used = (response.usage or {}).get("prompt_eval_count")
@@ -796,7 +1172,8 @@ class Agent:
                     if calls:
                         continue
                     self.completion_response_id = response.request_id
-                    completed = await self.complete(response.text, verify_fixture)
+                    async with self.frozen_workspace():
+                        completed = await self.complete(response.text, verify_fixture)
                     if completed is not None:
                         return completed
         except (AuditUnavailable, OSError) as exc:
@@ -805,8 +1182,10 @@ class Agent:
             return {"run_id": self.run_id, "status": "audit_unavailable", "error": str(exc)}
         except Exception as exc:
             from local_agent.runtime.recovery import NeedsReconciliation
+            from local_agent.runtime.repair_progress import LocalStalled
 
             status = (
+                "local_stalled" if isinstance(exc, LocalStalled) else
                 "budget_exhausted"
                 if isinstance(exc, BudgetExhausted)
                 else (
@@ -857,8 +1236,20 @@ class Agent:
                         causes=(self.last.event_id,),
                         reason={"type": type(exc).__name__, "detail": str(exc)},
                     )
-            return {"run_id": self.run_id, "status": status, "error": str(exc)}
+            return {
+                "run_id": self.run_id,
+                "status": status,
+                "error": str(exc),
+                **({"repair_progress": self.repair_guard.public()}
+                   if getattr(self, "repair_guard", None) else {}),
+                **(
+                    {"project_tests": self.project_test_report}
+                    if self.project_test_report is not None
+                    else {}
+                ),
+            }
         finally:
+            await snapshot_guard.aclose()
             self.store.blobs.end_budget()
             if hasattr(self.provider, "close"):
                 await self.provider.close()

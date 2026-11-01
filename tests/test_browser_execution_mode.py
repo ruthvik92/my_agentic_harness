@@ -112,6 +112,9 @@ def test_browser_persistent_choice_reuses_actual_docker_keeper(tmp_path, request
     cfgdir.mkdir()
     for name in ("coder.yaml", "browser.yaml"):
         shutil.copy2(Path("config") / name, cfgdir / name)
+    # Filesystem probes test keeper reuse; application test policy is covered separately.
+    coder = cfgdir / "coder.yaml"
+    coder.write_text(coder.read_text().replace("project_tests: true", "project_tests: false"))
     source = tmp_path / "source"
     source.mkdir()
     state = tmp_path / "state"

@@ -10,6 +10,10 @@ import pytest
 @pytest.mark.parametrize("script,asset", [
     ("workspace_results_check.js", "workspace-results.js"),
     ("config_controls_check.js", "config-controls.js"),
+    ("thread_controls_check.js", "thread-controls.js"),
+    ("browser_navigation_check.js", "index.html"),
+    ("workspace_reviews_check.js", "workspace-reviews.js"),
+    ("browser_loop_controls_check.js", "index.html"),
 ])
 def test_workspace_results_widget(script, asset):
     gjs = shutil.which("gjs")

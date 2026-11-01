@@ -7,7 +7,7 @@ from local_agent.storage.blobs import private_directory
 
 MAX_IMPORT_BYTES = 256 * 1024 * 1024
 IMPORT_EXCLUDES = frozenset({
-    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
+    ".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache",
     ".tool-build", ".browser-build", ".config-cleanup", ".config-consolidation",
     ".executor-review", ".executor-fixes",
 })
@@ -84,12 +84,16 @@ class Workspaces:
 
     def create_coding(self, source: Path, run_id: str, *, base_ref="HEAD") -> tuple[str, Path]:
         source = source.resolve(strict=True)
+        if self.root.resolve().is_relative_to(source):
+            raise ValueError("data root must be outside the imported repository")
+        if (source / ".git").is_symlink():
+            raise ValueError("Git metadata may not be a symlink")
         if not (source / ".git").exists():
             if base_ref != "HEAD":
                 raise ValueError("Selecting a starting revision requires a Git repository root")
-            return self.create(source)
-        if self.root.resolve().is_relative_to(source):
-            raise ValueError("data root must be outside the imported repository")
+            from local_agent.workspace.git import initialize_project
+
+            initialize_project(source)
         workspace_id = new_id("ws")
         root = self.root / workspace_id
         private_directory(root)

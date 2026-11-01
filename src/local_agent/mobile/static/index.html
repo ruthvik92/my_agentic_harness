@@ -7,10 +7,22 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 10px; background: #f5f5f5; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .topbar { position:sticky; top:0; z-index:10; background:white; padding:8px 0; display:flex; align-items:start; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+        .topbar h1 { flex:1; text-align:left; }
+        .token-meter { margin-left:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; font-size:12px; width:100%; }
+        .token-meter span { display:block; background:#eef3f8; padding:8px; border-radius:6px; white-space:pre-line; }
         h1 { text-align: center; color: #333; font-size: 1.2rem; margin: 0 0 10px 0; }
         .pairing { text-align: center; margin-bottom: 15px; font-size: 0.9em; color: #555; }
         .pairing code { background: #eee; padding: 4px 8px; border-radius: 4px; font-family: monospace; }
         .form-group { margin-bottom: 12px; }
+        .profile-picker { display:flex; align-items:center; gap:8px; }
+        .profile-picker select { flex:1; min-width:0; }
+        .profile-picker button { flex:none; }
+        .profile-editor { margin:12px 0; padding:12px; border:1px solid #ccd5df; border-radius:6px; }
+        .profile-editor h2 { margin:0 0 8px; font-size:1rem; }
+        #config-content { height:20rem; font-family:monospace; }
+        #advanced-run-settings, #review-settings { margin:12px 0; }
+        #advanced-run-settings > summary, #review-settings > summary { cursor:pointer; margin-bottom:8px; }
         label { display: block; margin-bottom: 4px; font-weight: 500; color: #333; font-size: 0.9em; }
         textarea, input[type="file"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
         textarea { height: 80px; resize: vertical; }
@@ -53,15 +65,54 @@
         select { width:100%; padding:8px; font-size:16px; box-sizing:border-box; }
         .breakdown { background:#eef3f8; padding:10px; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:0.85em; }
         .btn-row { flex-wrap:wrap; }
-        .trace { overflow-wrap:anywhere; }
+        .trace { overflow-wrap:anywhere; white-space:normal; }
+        .trace pre {white-space:pre-wrap; max-height:28rem; overflow:auto;}
+        #workspace-sessions, #loop-status { overflow-wrap:anywhere; }
+        .workspace-result pre { white-space:pre-wrap; max-height:20rem; overflow:auto; }
         .hidden { display: none; }
         [hidden] { display: none !important; }
         .error-banner { margin-top: 8px; padding: 8px; background: #fff3cd; color: #856404; border-radius: 4px; font-size: 0.85em; }
+        .app-layout { max-width: 1100px; margin: 0 auto; }
+        .app-layout.paired { display: grid; grid-template-columns: 250px minmax(0, 800px); gap: 16px; align-items: start; }
+        .container { width: 100%; box-sizing: border-box; min-width: 0; }
+        .history-sidebar { position: sticky; top: 10px; height: calc(100dvh - 20px); box-sizing: border-box; display: flex; flex-direction: column; padding: 14px; background: #e9edf2; border-radius: 8px; }
+        .history-sidebar h2 { font-size: 1rem; margin: 0 0 12px; }
+        .history-sidebar > button { flex: none; }
+        .history-list { overflow-y: auto; min-height: 0; margin-top: 12px; }
+        .history-list button { display: block; width: 100%; text-align: left; margin-bottom: 5px; background: transparent; overflow-wrap: anywhere; }
+        .history-list button:hover { background: #dce3ec; }
+        .history-list button[aria-current="page"] { background: #cdddf3; font-weight: 600; }
+        .history-list button:disabled { cursor: not-allowed; opacity: .6; }
+        .history-toggle { display: none; }
+        .workspace-review-report pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; }
+        .workspace-result fieldset { min-width: 0; margin-top: 12px; }
+        .workspace-review-control { max-width: 100%; box-sizing: border-box; }
+        input.workspace-review-control { width: 100%; padding: 8px; }
+        #primary-review-fields input { padding: 8px; font-size: 16px; }
+        @media (max-width: 720px) {
+            .app-layout.paired { display: flex; flex-direction: column; gap: 10px; }
+            .history-sidebar { display: none; position: static; width: 100%; height: auto; max-height: 45dvh; }
+            .history-sidebar.open { display: flex; }
+            .history-toggle { display: block; margin-bottom: 10px; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Local Agent Browser Interface</h1>
+    <div class="app-layout" id="app-layout">
+    <aside class="history-sidebar" id="history-sidebar" aria-label="Chat history" hidden>
+        <h2>Chats</h2>
+        <button type="button" id="history-new">+ New chat</button>
+        <nav class="history-list" id="history-list" aria-label="Saved chats"></nav>
+        <p id="history-note" class="model-run" aria-live="polite"></p>
+    </aside>
+    <main class="container">
+        <button type="button" class="history-toggle" id="history-toggle" aria-controls="history-sidebar" aria-expanded="false" hidden>Chat history</button>
+        <header class="topbar"><h1>Local Agent Browser Interface</h1>
+          <div id="token-meter" class="token-meter" aria-label="Measured model token usage for all chats and the current chat" title="All chats and current chat are shown separately. Current chat starts at zero. Measured usage updates after each response; pending or unavailable counts are marked partial." aria-live="polite" hidden>
+            <span id="all-local-token-meter">All chats · Local models: loading</span><span id="all-verifier-token-meter">All chats · OpenAI / verifier: loading</span>
+            <span id="local-token-meter">Current chat · Local models: loading</span><span id="verifier-token-meter">Current chat · OpenAI / verifier: loading</span>
+          </div>
+        </header>
         <div class="pairing" id="pairing-panel">
             <p>Enter pairing code:</p>
             <input id="pairing-code" type="password" autocomplete="off" placeholder="Code printed on your computer" aria-label="Pairing code">
@@ -69,14 +120,43 @@
         </div>
         <div class="form-group hidden" id="info-panel">
             <div id="model-display"></div>
-            <label for="config-select">Agent profile (config)</label><select id="config-select"></select>
+            <details><summary>Storage and traces</summary><p id="storage-location" class="model-run"></p></details>
+            <label for="config-select">Agent profile (config)</label>
+            <div class="profile-picker">
+              <select id="config-select"></select>
+              <button type="button" id="config-edit" aria-controls="config-editor-panel" aria-expanded="false">Edit profile</button>
+            </div>
             <p id="config-detail" class="model-run"></p>
-            <label for="thread-select">Saved chats (history)</label><select id="thread-select"><option value="">New chat</option></select>
-            <p id="history-note" class="model-run"></p>
+            <section id="config-editor-panel" class="profile-editor" aria-labelledby="config-editor-title" hidden>
+              <h2 id="config-editor-title">Edit profile</h2>
+              <p id="config-editing-file" class="model-run"></p>
+              <div id="config-name-fields" class="form-group" hidden>
+                <label for="config-name">New profile filename</label>
+                <input id="config-name" type="text" placeholder="my-coder.yaml">
+              </div>
+              <label for="config-content">YAML / JSON</label>
+              <textarea id="config-content" rows="16" spellcheck="false"></textarea>
+              <div class="btn-row">
+                <button type="button" id="config-validate">Validate</button>
+                <button type="button" id="config-save">Save</button>
+                <button type="button" id="config-cancel">Cancel</button>
+                <button type="button" id="config-clone">Save as new profile…</button>
+              </div>
+              <p id="config-status" class="model-run" role="status"></p>
+              <details><summary>Manage profile files</summary>
+                <label for="config-editor-file">Choose another file</label>
+                <select id="config-editor-file"></select>
+                <div class="btn-row">
+                  <button type="button" id="config-load">Load file</button>
+                  <button type="button" id="config-new">New blank profile</button>
+                  <button type="button" id="config-refresh">Refresh files</button>
+                </div>
+              </details>
+            </section>
+            <details id="advanced-run-settings"><summary>Advanced run settings</summary>
             <label for="model-select">Model override (optional)</label><select id="model-select"></select>
             <div id="legacy-circuit-controls" hidden>
               <label for="inference-select">Screenshot chat: netlist inference model</label><select id="inference-select"></select>
-              <label for="reviewer-select">Screenshot chat: OpenAI reviewer (paid)</label><select id="reviewer-select"></select>
             </div>
             <div class="form-group" id="execution-fields" hidden>
               <label for="execution-mode">Execution mode</label>
@@ -85,10 +165,27 @@
                 <option value="ephemeral">Ephemeral — new container per tool call</option>
                 <option value="persistent">Persistent — reuse container within this workspace</option>
               </select>
-              <p class="model-run">Persistent keeps container state such as /tmp between tool calls in this run. Each command starts a new process. A new task creates a new workspace; this does not control saved chat history. Project files survive either mode.</p>
+              <p class="model-run">Persistent reuses the container. Ephemeral starts a fresh container for each command. Project files survive both.</p>
             </div>
             <button type="button" id="refresh-models">Refresh model catalogs</button>
             <p class="model-run">Model capabilities are advertised by Ollama. Review the actual changes and tests to assess completion. The selected local model loads when its task starts.</p>
+            </details>
+            <details id="review-settings"><summary>Review settings</summary>
+            <label for="reviewer-select">OpenAI reviewer (paid, optional)</label><select id="reviewer-select"></select>
+            <label for="review-mode">Review scope</label>
+            <select id="review-mode">
+              <option id="workspace-review-option" value="workspace">Workspace — inspect files and run tests</option>
+              <option value="conversation">Conversation only — cannot run tests</option>
+            </select>
+            <div id="primary-review-fields" hidden>
+              <p id="primary-review-target" class="model-run"></p>
+              <label for="primary-review-directory">Test working directory (relative to project)</label>
+              <input id="primary-review-directory" type="text" value="." style="width:100%;box-sizing:border-box">
+              <label for="primary-review-command">Tests (auto: reviewer discovers suites; override optional)</label>
+              <input id="primary-review-command" type="text" value="auto" style="width:100%;box-sizing:border-box">
+              <p>Leave tests on auto. The paid reviewer discovers and runs relevant suites; selected tests are repeated in a fresh copy before approval.</p>
+            </div>
+            </details>
             <div id="breakdown" class="breakdown">No thread selected.</div>
             <details id="usage-panel"><summary>Token usage and estimated OpenAI savings</summary>
               <pre id="thread-usage" style="white-space:pre-wrap">Select a saved chat.</pre>
@@ -98,33 +195,10 @@
             <p class="model-run">Top thumbs rate the whole thread. Rate individual replies with the buttons inside each answer.</p>
             <div class="btn-row">
               <button type="button" id="netlist-btn">Infer draft netlist</button>
-              <button type="button" id="verify-btn">Review with OpenAI (paid)</button>
+              <button type="button" id="verify-btn">Review conversation (paid)</button>
               <button type="button" id="thumb-up" aria-label="Thumbs up">👍</button>
               <button type="button" id="thumb-down" aria-label="Thumbs down">👎</button>
             </div><p id="verifier-note" class="model-run"></p>
-            <details id="config-editor-panel"><summary>Agent profile editor</summary>
-              <div class="form-group">
-                <label for="config-editor-file">Profile file</label>
-                <select id="config-editor-file"></select>
-              </div>
-              <div class="form-group">
-                <label for="config-name">Profile name</label>
-                <input id="config-name" type="text" placeholder="profile.yaml">
-              </div>
-              <div class="form-group">
-                <label for="config-content">Profile content</label>
-                <textarea id="config-content" rows="16" style="font-family:monospace" placeholder="# agent profile YAML or JSON"></textarea>
-              </div>
-              <div class="btn-row">
-                <button type="button" id="config-new">New</button>
-                <button type="button" id="config-clone">Clone</button>
-                <button type="button" id="config-load">Load</button>
-                <button type="button" id="config-validate">Validate</button>
-                <button type="button" id="config-save">Save</button>
-                <button type="button" id="config-refresh">Refresh configs</button>
-              </div>
-              <p id="config-status" class="model-run"></p>
-            </details>
             <div class="form-group" id="workspace-fields">
               <label for="workspace-input">Source workspace (host path under an allowed root)</label>
               <input id="workspace-input" type="text" placeholder="/allowed/roots/workspace">
@@ -181,25 +255,43 @@
         <div class="status" id="status">Ready</div>
         <div class="error-banner hidden" id="error-banner"></div>
         <div class="transcript" id="transcript"></div>
+        <div id="workspace-sessions"></div>
+        <section id="loop-config" hidden>
+          <h3>Local agent / verifier loop</h3>
+          <p id="loop-workspace" class="model-run"></p>
+          <label for="loop-paid">Maximum paid review/diagnosis attempts (default 5)</label><input id="loop-paid" type="number" min="0" max="20" value="5">
+          <label for="loop-local">Maximum local iterations</label><input id="loop-local" type="number" min="1" max="100" value="12">
+          <label for="loop-minutes">Scheduling time limit (minutes)</label><input id="loop-minutes" type="number" min="1" max="1440" value="60">
+          <label for="loop-tokens">Paid token allowance</label><input id="loop-tokens" type="number" min="1000" max="10000000" value="100000">
+          <label><input id="loop-consent" type="checkbox"> Authorize paid reviews and one advisory failure diagnosis within these limits. API billing applies.</label>
+          <p class="model-run">Starts with a local iteration. After two failed local attempts, may use one authorized paid attempt for advisory diagnosis. Diagnosis cannot approve code. Stops early on verifier approval. After the paid allowance ends, continues locally until tests pass or a limit is reached. Scheduling limits are checked between bounded stages. Stop prevents the next stage; a current stage may finish. Merging is separate.</p>
+          <button type="button" id="loop-start">Start local / verifier loop</button>
+          <button type="button" id="loop-dismiss">Cancel</button>
+        </section>
+        <div id="loop-status"></div>
         <div id="run-display" class="model-run"></div>
         <p id="context-note" class="model-run">Chats and screenshots are saved on this computer. Recent exchanges are reused as memory.</p>
-        <button type="button" class="trace-toggle" id="trace-toggle">Show / hide trace events</button>
+        <button type="button" class="trace-toggle" id="trace-toggle">Show / hide run timeline</button>
         <div class="trace" id="trace"></div>
+    </main>
     </div>
 
     <script nonce="NONCE_VALUE" src="/thread-controls.js"></script>
     <script nonce="NONCE_VALUE" src="/config-controls.js"></script>
     <script nonce="NONCE_VALUE" src="/workspace-results.js"></script>
+    <script nonce="NONCE_VALUE" src="/workspace-reviews.js"></script>
     <script nonce="NONCE_VALUE">
 const els = Object.fromEntries(['pairing-panel','pairing-code','login-btn','info-panel','model-display',
   'question','image','preview-container','preview','ask-btn','new-conversation-btn','resume-btn',
   'status','error-banner','transcript','trace-toggle','trace','run-display','context-note',
-  'thread-select','model-select','inference-select','refresh-models','breakdown','netlist-btn','verify-btn','thumb-up','thumb-down','verifier-note','reviewer-select','history-note','thread-usage','all-usage','refresh-usage','config-select']
+  'token-meter','all-local-token-meter','all-verifier-token-meter','local-token-meter','verifier-token-meter','review-mode','primary-review-fields','primary-review-directory','primary-review-command','primary-review-target','app-layout','history-sidebar','history-list','history-new','history-toggle','model-select','inference-select','refresh-models','breakdown','netlist-btn','verify-btn','thumb-up','thumb-down','verifier-note','reviewer-select','history-note','thread-usage','all-usage','refresh-usage','config-select']
   .map(id => [id, document.getElementById(id)]));
 let currentJobId = null, lastJobId = null, activeQuestion = '', image = null;
 let currentThreadId = null, threadData = null, catalog = null;
 const answerVotesPending = new Set();
+let navigating = false, submitting = false, reviewTargetKey = null, lastMeterRefresh = 0;
 let transcript = [], paired = false, pollTimer = null, polling = false, uploading = false;
+let loopWorkspace = null;
 const storage = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch {} },
@@ -209,16 +301,34 @@ function status(message) { els.status.textContent = message; }
 function showError(message) { els['error-banner'].textContent = message; els['error-banner'].classList.remove('hidden'); }
 function clearError() { els['error-banner'].classList.add('hidden'); }
 function busy(value) {
+  value = value || navigating || submitting || answerVotesPending.size > 0;
   const legacyCircuit = window.ConfigControls && typeof window.ConfigControls.mode === 'function' && window.ConfigControls.mode() === 'chat';
   els['ask-btn'].disabled = value || !paired;
   els.image.disabled = value || (window.ConfigControls && typeof window.ConfigControls.mode === 'function' && window.ConfigControls.mode() === 'circuit');
-  for (const id of ['model-select','inference-select','reviewer-select','thread-select','refresh-models']) els[id].disabled = value || !paired;
+  for (const id of ['model-select','inference-select','reviewer-select','refresh-models','review-mode','primary-review-directory','primary-review-command']) els[id].disabled = value || !paired;
   els['netlist-btn'].disabled = value || !paired || !currentThreadId || !legacyCircuit;
-  els['verify-btn'].disabled = value || !paired || !currentThreadId || !legacyCircuit || !catalog?.verifier.enabled || !els['reviewer-select'].value;
-  if (catalog) els['verifier-note'].textContent = 'Paid reviewer: ' + (els['reviewer-select'].value.replace(/^openai:/, '') || catalog.verifier.model || 'not configured') + ' · ' + (!catalog.verifier.enabled ? catalog.verifier.reason : !currentThreadId ? 'Open a saved chat or ask a question first.' : 'Press Review to send the saved image and recent chat to OpenAI. API billing applies.');
+  const review = window.ThreadControls?.reviewState ? ThreadControls.reviewState(catalog?.verifier, threadData, {
+    paired, busy: value, selected: els['reviewer-select'].value
+  }) : {enabled: false, note: 'Browser controls unavailable. Reload this page.'};
+  els['verify-btn'].disabled = !review.enabled;
+  const workspace = els['review-mode'].value === 'workspace';
+  const candidate = codingReviewTarget();
+  els['verify-btn'].textContent = workspace ? 'Verify workspace and run tests (paid)' : 'Review conversation only (paid)';
+  els['verify-btn'].disabled = !review.enabled || (workspace && !candidate);
+  els['primary-review-fields'].hidden = !workspace;
+  els['verifier-note'].textContent = workspace && review.enabled
+    ? 'Runs your configured tests in Docker and inspects the committed workspace. A saved approval enables a separate merge action. API billing applies.'
+    : review.note;
+  window.ThreadControls?.historyBusy?.(els['history-list'], value || !paired);
+  els['history-new'].disabled = value || !paired;
+  for (const control of document.querySelectorAll('.workspace-review-control')) {
+    control.disabled = value || !paired || (control.dataset.requiresReviewer === 'true' && !catalog?.verifier.enabled);
+  }
+  for (const control of document.querySelectorAll('.workspace-session-control')) control.disabled=value || !paired;
+  document.getElementById('loop-start').disabled=value || !paired;
   els['thumb-up'].disabled = els['thumb-down'].disabled = value || !paired || !currentThreadId;
   for (const button of document.querySelectorAll('.answer-feedback button')) button.disabled = value || !paired || !button.dataset.answerId || answerVotesPending.has(button.dataset.answerId);
-  els['new-conversation-btn'].disabled = value;
+  els['new-conversation-btn'].disabled = value || !paired;
   els['resume-btn'].disabled = !currentJobId || polling || !paired;
   if (window.ConfigControls && typeof window.ConfigControls.busy === 'function') window.ConfigControls.busy(value || !paired);
 }
@@ -233,7 +343,7 @@ function render() {
     if (assistant) {
       div.open = index === latest;
       const summary = document.createElement('summary');
-      summary.textContent = (item.kind === 'review' ? 'OpenAI review' : item.kind === 'netlist' ? 'Netlist draft' : 'Agent reply') + (item.model ? ' · ' + item.model : '');
+      summary.textContent = (item.kind === 'workspace_review' ? 'Workspace review' : item.kind === 'review' ? 'Conversation review' : item.kind === 'netlist' ? 'Netlist draft' : 'Agent reply') + (item.model ? ' · ' + item.model : '');
       const preview = document.createElement('span'); preview.className = 'reply-preview';
       preview.textContent = item.content.replace(/\s+/g, ' ').slice(0, 110);
       summary.appendChild(preview); div.appendChild(summary);
@@ -255,6 +365,16 @@ function render() {
     }
     if (assistant) {
       window.WorkspaceResults.append(div, item);
+      if (item.project_tests) {
+        const tests = document.createElement('details');
+        const label = document.createElement('summary'); label.textContent = 'Controller tests: ' + item.project_tests.status;
+        const output = document.createElement('pre'); output.textContent = JSON.stringify(item.project_tests, null, 2);
+        tests.appendChild(label); tests.appendChild(output); div.appendChild(tests);
+      }
+      window.WorkspaceReviews?.appendReport(div, item);
+      if (item.mode === 'coding' && !item.error && (!item.job_status || item.job_status === 'completed')) {
+        window.WorkspaceReviews?.appendRequest(div, item);
+      }
       const ratings = document.createElement('div'); ratings.className = 'answer-feedback btn-row';
       const label = document.createElement('span'); label.className = 'model-run'; label.textContent = 'Rate this answer:'; ratings.appendChild(label);
       const note = document.createElement('span'); note.className = 'model-run'; note.setAttribute('aria-live', 'polite');
@@ -301,6 +421,10 @@ async function api(path, data) {
   if (!response.ok) {
     if (response.status === 401) {
       paired = false;
+      els['token-meter'].hidden = true;
+      els['history-sidebar'].hidden = true;
+      els['history-toggle'].hidden = true;
+      els['app-layout'].classList.remove('paired');
       els['pairing-panel'].classList.remove('hidden');
       busy(!!currentJobId || uploading);
     }
@@ -320,17 +444,42 @@ async function refreshModels() {
 }
 async function refreshThreads() {
   const threads = await api('/threads');
-  ThreadControls.renderThreads(els['thread-select'], threads, currentThreadId);
+  ThreadControls.renderThreads(els['history-list'], threads, currentThreadId, selectThread, !!currentJobId || uploading || navigating || submitting || !paired);
   els['history-note'].textContent = threads.length + ' saved chats — choose one to continue with its image and recent memory.';
 }
 async function refreshUsage() {
   const selected = currentThreadId;
+  if (!selected) {
+    ThreadControls.renderMeter(els['local-token-meter'], els['verifier-token-meter'], null, 'Current chat');
+    els['thread-usage'].textContent = 'New chat: no token usage yet.';
+  }
   const [all, thread] = await Promise.all([api('/usage'), selected ? api('/threads/' + selected + '/usage') : Promise.resolve(null)]);
   ThreadControls.renderUsage(els['all-usage'], all, 'All saved chats');
+  ThreadControls.renderMeter(els['all-local-token-meter'], els['all-verifier-token-meter'], all, 'All chats');
   if (selected === currentThreadId) {
+    ThreadControls.renderMeter(els['local-token-meter'], els['verifier-token-meter'], thread, 'Current chat');
+    lastMeterRefresh = Date.now();
     if (thread) ThreadControls.renderUsage(els['thread-usage'], thread, 'Selected chat');
-    else els['thread-usage'].textContent = 'Select a saved chat to see its token totals.';
+    else els['thread-usage'].textContent = 'New chat: no token usage yet.';
   }
+}
+function codingReviewTarget() {
+  return [...(threadData?.messages || [])].reverse().find(item => item.role === 'assistant' &&
+    item.mode === 'coding' && item.job_id && item.git_workspace?.candidate_commit) || null;
+}
+function configureReviewTarget() {
+  const candidate = codingReviewTarget();
+  const key = (currentThreadId || '') + ':' + (candidate?.job_id || '');
+  if (key !== reviewTargetKey) {
+    reviewTargetKey = key;
+    els['review-mode'].value = candidate ? 'workspace' : 'conversation';
+    els['primary-review-directory'].value = candidate?.working_directory || candidate?.git_workspace?.working_directory || '.';
+    els['primary-review-command'].value = 'auto';
+  }
+  document.getElementById('workspace-review-option').disabled = !candidate;
+  els['primary-review-target'].textContent = candidate
+    ? 'Candidate: ' + candidate.git_workspace.candidate_commit + ' · source branch: ' + candidate.git_workspace.base_branch
+    : 'Open a saved coding result to inspect files and run tests.';
 }
 function breakdown() {
   ThreadControls.breakdown(els.breakdown, threadData);
@@ -341,6 +490,7 @@ async function openThread(id, resume=true) {
   const value = await api('/threads/' + id);
   currentThreadId = id; threadData = value; transcript = value.messages; image = value.image;
   storage.set('threadId', id);
+  configureReviewTarget();
   if (image) {
     els.preview.src = 'data:' + value.mime + ';base64,' + image;
     els['preview-container'].classList.remove('hidden');
@@ -354,7 +504,87 @@ async function openThread(id, resume=true) {
     storage.set('currentJobId', currentJobId);
     poll();
   }
-  await refreshThreads(); await refreshUsage(); busy(!!currentJobId || uploading);
+  await refreshThreads(); await refreshUsage(); await refreshWorkspaceDetails(); await refreshLoops(); busy(!!currentJobId || uploading);
+}
+async function refreshWorkspaceDetails() {
+  const parent=document.getElementById('workspace-sessions');
+  if(!currentThreadId || !window.WorkspaceResults?.sessions){parent.replaceChildren();return;}
+  const thread=currentThreadId;
+  try{
+    const value=await api('/threads/'+thread+'/workspaces');
+    if(thread!==currentThreadId)return;
+    WorkspaceResults.sessions(parent,value,{
+      continue:result=>{ConfigControls.continueTask(result);els.question.focus();status('Continuing the selected workspace. Enter your follow-up and press Ask.');},
+      stop:async result=>{
+        try{await api('/threads/'+currentThreadId+'/workspaces/'+result.workspace_id+'/stop-container',{container_id:result.container.id});await refreshWorkspaceDetails();busy(!!currentJobId);}
+        catch(error){showError(error.message);}
+      },startLoop:showLoopOptions,error:showError
+    });
+  }catch(error){showError('Workspace details: '+error.message);}
+}
+function showLoopOptions(workspace) {
+  if(currentJobId || submitting || navigating)return;
+  loopWorkspace=workspace;
+  if(!document.getElementById('execution-mode').value && ['persistent','ephemeral'].includes(workspace.execution_mode)) document.getElementById('execution-mode').value=workspace.execution_mode;
+  document.getElementById('loop-workspace').textContent='Workspace: '+workspace.workspace_id+' · '+workspace.git_workspace.worktree;
+  document.getElementById('loop-consent').checked=false;
+  document.getElementById('loop-config').hidden=false;
+  document.getElementById('loop-paid').focus();
+}
+async function startLoop() {
+  if(!paired || !loopWorkspace || currentJobId || submitting || navigating || uploading)return;
+  if(ConfigControls.mode()!=='coding'){showError('Select a local coding configuration first.');return;}
+  const paid=Number(document.getElementById('loop-paid').value);
+  const consent=document.getElementById('loop-consent').checked;
+  if(paid>0 && (!consent || !catalog?.verifier.enabled || !els['reviewer-select'].value)){
+    showError('Choose an available paid reviewer and authorize the allowance, or set paid attempts to 0.');return;
+  }
+  submitting=true;busy(true);clearError();
+  try{
+    const request={workspace_id:loopWorkspace.workspace_id,profile_name:els['config-select'].value,
+      authorize_paid:consent,max_paid_reviews:paid,max_local_cycles:Number(document.getElementById('loop-local').value),
+      timeout_seconds:Number(document.getElementById('loop-minutes').value)*60,
+      paid_token_budget:Number(document.getElementById('loop-tokens').value)};
+    if(els['model-select'].value)request.model_id=els['model-select'].value;
+    if(paid>0)request.reviewer_model_id=els['reviewer-select'].value;
+    const mode=document.getElementById('execution-mode').value;if(mode)request.execution_mode=mode;
+    const state=await api('/threads/'+currentThreadId+'/loops',request);
+    currentJobId=state.active_job_id;activeQuestion='Local / verifier loop';
+    storage.set('currentJobId',currentJobId);storage.set('activeQuestion',activeQuestion);
+    document.getElementById('loop-config').hidden=true;
+    await refreshLoops();poll();
+  }catch(error){showError(error.message);await refreshLoops();}
+  finally{submitting=false;busy(!!currentJobId || uploading);}
+}
+async function refreshLoops() {
+  const parent=document.getElementById('loop-status');
+  if(!currentThreadId){parent.replaceChildren();return;}
+  const thread=currentThreadId;
+  try{
+    const values=await api('/threads/'+thread+'/loops');if(thread!==currentThreadId)return;
+    parent.replaceChildren();
+    for(const loop of Array.isArray(values)?values:[]){
+      const make=(tag,text)=>{const n=document.createElement(tag);n.textContent=text || '';return n;};
+      const panel=make('details');panel.open=!['approved','tests_passed_unverified','stopped'].includes(loop.status);
+      const label=loop.status==='tests_passed_unverified'?'Tests passed — latest changes not verifier-approved':loop.status;
+      panel.appendChild(make('summary','Loop: '+label+' · '+loop.workspace_id));
+      const localOnly=loop.paid_disabled || loop.paid_attempts>=loop.limits.max_paid_reviews || loop.paid_tokens>=loop.limits.paid_token_budget;
+      panel.appendChild(make('p','Stage: '+loop.stage+(localOnly?' · local-only':'')+' · local '+loop.local_attempts+'/'+loop.limits.max_local_cycles+' · paid '+loop.paid_attempts+'/'+loop.limits.max_paid_reviews));
+      if(loop.active_job_id)panel.appendChild(make('p','Current attempt: '+(loop.current_run_id || 'not created yet')+' · '+(loop.current_job_status || 'queued')));
+      panel.appendChild(make('p',loop.reason));
+      const usage=loop.live_usage || {};
+      panel.appendChild(make('p','Measured tokens · local '+(usage.measured_local_total || 0)+' · verifier '+(usage.measured_openai_total || 0)+((usage.unknown_openai_requests || usage.unknown_local_usage)?' · partial':'')));
+      if(loop.paid_disabled)panel.appendChild(make('p','Further paid calls are disabled because usage or a review outcome was uncertain.'));
+      if(loop.review_eligibility)panel.appendChild(make('p','Paid review '+(loop.review_eligibility.eligible?'eligible: ':'blocked: ')+loop.review_eligibility.reason));
+      if(loop.status==='running'){
+        const stop=make('button','Stop loop after current stage');stop.type='button';
+        stop.addEventListener('click',async()=>{stop.disabled=true;try{await api('/threads/'+thread+'/loops/'+loop.loop_id+'/stop',{});await refreshLoops();}catch(error){showError(error.message);stop.disabled=false;}});
+        panel.appendChild(stop);
+      }
+      for(const cycle of loop.history)panel.appendChild(make('p',cycle.stage+' · '+cycle.status+' · '+(cycle.test_status || cycle.review_status || '')+' · '+(cycle.run_id || 'no run')+(cycle.error?' · '+cycle.error:'')));
+      parent.appendChild(panel);
+    }
+  }catch(error){showError('Loop status: '+error.message);}
 }
 async function ensureThread(title) {
   if (currentThreadId) return currentThreadId;
@@ -365,9 +595,16 @@ async function ensureThread(title) {
 async function info() {
   const value = await api('/info');
   paired = true;
+  els['token-meter'].hidden = false;
+  els['app-layout'].classList.add('paired');
+  els['history-sidebar'].hidden = false;
+  els['history-toggle'].hidden = false;
   els['pairing-panel'].classList.add('hidden');
   els['info-panel'].classList.remove('hidden');
   els['model-display'].textContent = 'Local owner · browser interface (terminal pairing, not OAuth) · uploads and chat; selected profile details show tools.';
+  if (value.data_root) document.getElementById('storage-location').textContent =
+    'Chats, workspaces and run evidence: ' + value.data_root +
+    '. Ledger: ' + value.data_root + '/control/agent.db. Use Show / hide run timeline below for this chat.';
   if (value.restart_required) showError('The browser server was updated on the computer. Restart the browser server, then reload this page and pair again.');
   await refreshModels();
   if (window.ConfigControls) await ConfigControls.refresh(value.default_profile, value.allowed_roots);
@@ -391,7 +628,7 @@ async function ask(kind='answer') {
   if (currentJobId || uploading || els['ask-btn'].disabled) return;
   const question = els.question.value.trim();
   if (kind === 'answer' && !question) { showError('Enter a question first.'); return; }
-  busy(true); clearError(); status('Submitting…');
+  submitting = true; busy(true); clearError(); status('Submitting…');
   try {
     await ensureThread(question);
     let request, endpoint;
@@ -407,13 +644,18 @@ async function ask(kind='answer') {
     currentJobId = value.job_id; activeQuestion = kind === 'answer' ? question : kind === 'review' ? 'Paid OpenAI review' : 'Draft netlist inference';
     storage.set('currentJobId', currentJobId); storage.set('activeQuestion', activeQuestion);
     els.question.value = ''; await refreshThreads(); poll();
-  } catch (error) { showError(error.message); status('Submission was not confirmed.'); busy(false); }
+  } catch (error) { showError(error.message); status('Submission was not confirmed.'); }
+  finally { submitting = false; busy(!!currentJobId || uploading); }
 }
 async function poll() {
   if (!currentJobId || polling) return;
   clearTimeout(pollTimer); polling = true; busy(true); clearError();
   try {
     const job = await api('/jobs/' + currentJobId);
+    if (Date.now() - lastMeterRefresh > 3000) {
+      refreshUsage().catch(() => {}); refreshLoops().catch(() => {});
+      refreshWorkspaceDetails().then(()=>busy(!!currentJobId || uploading)).catch(()=>{});
+    }
     if (['completed','failed','interrupted'].includes(job.status)) {
       lastJobId = currentJobId;
       els['run-display'].textContent = 'Model: ' + job.model + ' · Run: ' + (job.run_id || 'not created') +
@@ -423,8 +665,10 @@ async function poll() {
         else { transcript.push({role:'user', content:activeQuestion}, {role:'assistant', content:job.answer}); render(); }
         status('Completed · answer/review is unverified');
       } else { if (job.thread_id) await openThread(job.thread_id, false); status(job.status); showError(job.error || 'Run did not complete.'); }
-      currentJobId = null; activeQuestion = '';
-      storage.remove('currentJobId'); storage.remove('activeQuestion');
+      const next=job.loop_id && threadData?.pending_job && threadData.pending_job!==currentJobId ? threadData.pending_job : null;
+      currentJobId = next; activeQuestion = next ? 'Local / verifier loop' : '';
+      if(next){storage.set('currentJobId',next);storage.set('activeQuestion',activeQuestion);pollTimer=setTimeout(poll,500);}
+      else{storage.remove('currentJobId');storage.remove('activeQuestion');}
       els.trace.textContent = ''; els.trace.style.display = 'none';
     } else {
       status(job.status + ' · ' + (job.kind || 'answer') + ' · ' + job.model + ' (' + (job.provider || 'recorded') + ')' +
@@ -437,10 +681,63 @@ async function poll() {
     status('Polling paused; the question may still be running.');
   } finally { polling = false; busy(!!currentJobId || uploading); }
 }
+async function startWorkspaceReview(result, command, directory) {
+  if (!paired || currentJobId || uploading || navigating || submitting || answerVotesPending.size) return;
+  if (!catalog?.verifier.enabled || !els['reviewer-select'].value) {
+    showError(catalog?.verifier.reason || 'Select an available OpenAI reviewer first.'); return;
+  }
+  submitting = true; busy(true); clearError(); status('Submitting workspace review…');
+  try {
+    const job = await api('/threads/' + currentThreadId + '/workspace-review', {
+      answer_job_id: result.job_id, candidate_commit: result.git_workspace.candidate_commit,
+      model_id: els['reviewer-select'].value, test_command: command, working_directory: directory
+    });
+    currentJobId = job.job_id; activeQuestion = 'Workspace review and configured checks';
+    storage.set('currentJobId', currentJobId); storage.set('activeQuestion', activeQuestion);
+    poll();
+  } catch (error) { showError(error.message); status('Workspace review could not start.'); }
+  finally { submitting = false; busy(!!currentJobId || uploading); }
+}
+async function mergeWorkspaceReview(result) {
+  if (!paired || currentJobId || uploading || navigating || submitting || answerVotesPending.size) return;
+  submitting = true; busy(true); clearError();
+  try {
+    const merged = await api('/threads/' + currentThreadId + '/merge-review', {
+      review_job_id: result.job_id, candidate_commit: result.workspace_review.target.candidate_commit
+    });
+    await openThread(currentThreadId, false); status('Merged reviewed commit ' + merged.commit);
+  } catch (error) { showError(error.message); }
+  finally { submitting = false; busy(!!currentJobId || uploading); }
+}
+async function repairWorkspaceReview(result) {
+  if (!paired || currentJobId || uploading || navigating || submitting || answerVotesPending.size) return;
+  if (window.ConfigControls?.mode() !== 'coding' || !els['config-select'].value) {
+    showError('Select a local coding configuration above, then click Fix with local model.'); return;
+  }
+  submitting = true; busy(true); clearError(); status('Starting local repair from the saved review…');
+  try {
+    const request = {
+      review_job_id: result.job_id,
+      candidate_commit: result.workspace_review.target.candidate_commit,
+      profile_name: els['config-select'].value
+    };
+    if (els['model-select'].value) request.model_id = els['model-select'].value;
+    const execution = document.getElementById('execution-mode').value;
+    if (execution) request.execution_mode = execution;
+    const job = await api('/threads/' + currentThreadId + '/repair-review', request);
+    currentJobId = job.job_id; activeQuestion = 'Fix the workspace review findings and rerun the tests.';
+    storage.set('currentJobId', currentJobId); storage.set('activeQuestion', activeQuestion);
+    poll();
+  } catch (error) { showError(error.message); status('Local repair could not start.'); }
+  finally { submitting = false; busy(!!currentJobId || uploading); }
+}
 function clearConversation() {
-  if (currentJobId || uploading) return;
+  if (currentJobId || uploading || navigating || submitting || !paired || answerVotesPending.size) return;
   clearTimeout(pollTimer); image = null; transcript = []; lastJobId = null; currentThreadId = null; threadData = null;
-  storage.remove('threadId'); els['thread-select'].value = ''; breakdown();
+  configureReviewTarget();
+  document.getElementById('workspace-sessions').replaceChildren();
+  document.getElementById('loop-status').replaceChildren();document.getElementById('loop-config').hidden=true;loopWorkspace=null;
+  storage.remove('threadId'); ThreadControls.markThread(els['history-list'], null); breakdown();
   els.question.value = ''; els.image.value = ''; els.preview.removeAttribute('src');
   els['preview-container'].classList.add('hidden');
   els.trace.textContent = ''; els.trace.style.display = 'none';
@@ -526,13 +823,15 @@ async function selectImage() {
   } finally { uploading = false; els.image.value = ''; busy(false); }
 }
 async function trace() {
-  if (!currentThreadId && !lastJobId) { showError('Open a saved thread first to view its trace.'); return; }
+  const jobId=currentJobId || lastJobId, threadId=currentThreadId;
+  if (!jobId) { showError('This chat has no coding or review attempt to inspect yet.'); return; }
   if (els.trace.style.display === 'block') { els.trace.style.display = 'none'; return; }
   try {
-    const events = await api(currentThreadId ? '/threads/' + currentThreadId + '/events' : '/jobs/' + lastJobId + '/events');
-    els.trace.textContent = events.map(e => `${e.run_seq} ${e.event_type} ${e.actor}\n${JSON.stringify(e.data, null, 2)}`).join('\n\n');
+    const diagnostic = await api('/jobs/' + encodeURIComponent(jobId) + '/diagnostics');
+    if(threadId !== currentThreadId || jobId !== (currentJobId || lastJobId)) return;
+    WorkspaceResults.timeline(els.trace, diagnostic);
     els.trace.style.display = 'block';
-  } catch (error) { showError(error.message); }
+  } catch (error) { if(threadId === currentThreadId) showError(error.message); }
 }
 els['login-btn'].addEventListener('click', login);
 els['pairing-code'].addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
@@ -540,9 +839,31 @@ els['ask-btn'].addEventListener('click', () => ask());
 els['netlist-btn'].addEventListener('click', () => ask('netlist'));
 els['refresh-usage'].addEventListener('click', ()=>refreshUsage().catch(error=>showError(error.message)));
 els['reviewer-select'].addEventListener('change', ()=>{storage.set('reviewer-select',els['reviewer-select'].value);busy(!!currentJobId || uploading);});
-els['verify-btn'].addEventListener('click', () => ask('review'));
+els['review-mode'].addEventListener('change', () => busy(!!currentJobId || uploading));
+els['verify-btn'].addEventListener('click', async () => {
+  if (els['verify-btn'].disabled) return;
+  if (els['review-mode'].value === 'workspace') {
+    const candidate = codingReviewTarget();
+    if (candidate) await startWorkspaceReview(candidate, els['primary-review-command'].value, els['primary-review-directory'].value);
+  } else await ask('review');
+});
 els['refresh-models'].addEventListener('click', async () => { try { await api('/models/refresh', {}); await refreshModels(); } catch (error) { showError(error.message); } });
-els['thread-select'].addEventListener('change', async () => { if (!els['thread-select'].value) { clearConversation(); return; } try { await openThread(els['thread-select'].value); } catch (error) { showError(error.message); } });
+async function selectThread(id) {
+  if (!paired || currentJobId || uploading || navigating || submitting || answerVotesPending.size) return;
+  navigating = true; busy(true);
+  try { await openThread(id); closeHistory(); }
+  catch (error) { showError(error.message); }
+  finally { navigating = false; busy(!!currentJobId || uploading); }
+}
+function closeHistory() {
+  els['history-sidebar'].classList.remove('open');
+  els['history-toggle'].setAttribute('aria-expanded', 'false');
+}
+els['history-toggle'].addEventListener('click', () => {
+  const open = els['history-sidebar'].classList.toggle('open');
+  els['history-toggle'].setAttribute('aria-expanded', String(open));
+});
+els['history-new'].addEventListener('click', () => { clearConversation(); closeHistory(); });
 els['model-select'].addEventListener('change', () => { storage.set('model-select', els['model-select'].value); });
 els['inference-select'].addEventListener('change', () => storage.set('inference-select', els['inference-select'].value));
 els['config-select'].addEventListener('change', () => { els['model-select'].value = ''; storage.remove('model-select'); if (window.ConfigControls) ConfigControls.busy(!!currentJobId || uploading); });
@@ -551,8 +872,11 @@ els['new-conversation-btn'].addEventListener('click', clearConversation);
 els['resume-btn'].addEventListener('click', poll);
 els.image.addEventListener('change', selectImage);
 els['trace-toggle'].addEventListener('click', trace);
+document.getElementById('loop-start').addEventListener('click',startLoop);
+document.getElementById('loop-dismiss').addEventListener('click',()=>{document.getElementById('loop-config').hidden=true;});
 async function initialize() {
-  if (!window.ThreadControls || typeof window.ThreadControls.catalogOptions !== 'function' ||
+  if (!window.WorkspaceReviews || typeof window.WorkspaceReviews.init !== 'function' ||
+      !window.ThreadControls || typeof window.ThreadControls.catalogOptions !== 'function' ||
       !window.ConfigControls || typeof window.ConfigControls.init !== 'function' ||
       typeof window.ConfigControls.models !== 'function' ||
       typeof window.ConfigControls.refresh !== 'function' ||
@@ -563,7 +887,9 @@ async function initialize() {
     status('Browser controls unavailable.'); busy(false); els['login-btn'].disabled = true;
     return;
   }
+  window.WorkspaceReviews?.init({start: startWorkspaceReview, merge: mergeWorkspaceReview, repair: repairWorkspaceReview, error: showError});
   ConfigControls.init(api, showError, () => { if (catalog) ConfigControls.models(catalog.models); busy(!!currentJobId || uploading); });
+  configureReviewTarget();
   const saved = storage.get('currentJobId');
   if (saved && /^[0-9a-f]{32}$/.test(saved)) {
     currentJobId = saved; activeQuestion = storage.get('activeQuestion') || 'Saved question';

@@ -3,6 +3,8 @@
 This document describes the implemented harness. The original
 [build guide](history/local-agent-build-guide.md) explains the design and milestones;
 [the five-minute guide](tldr.md) provides the short operational introduction.
+For high-level browser use and the task/review/repair lifecycle, read the
+[functional instruction manual](functional-manual.md).
 
 ## Architecture and the execution loop
 

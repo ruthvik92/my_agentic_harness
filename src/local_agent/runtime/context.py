@@ -58,11 +58,15 @@ class ContextBuilder:
             tool for tool in definitions() if tool["function"]["name"] in self.config.tools
         )
 
-        def payload(chosen):
-            messages = [*fixed, *[m for group in chosen for m in group]]
+        def payload(chosen, note=None):
+            messages = [*fixed, *([note] if note else []), *[m for group in chosen for m in group]]
             if self.config.provider == "openai":
                 from local_agent.models.openai import wire_messages
+                from local_agent.models.responses import payload as responses_payload
+                from local_agent.models.responses import uses_responses
 
+                if uses_responses(self.config):
+                    return responses_payload(self.config, messages, tools)
                 result = {
                     "model": self.config.model,
                     "messages": wire_messages(messages),
@@ -78,7 +82,7 @@ class ContextBuilder:
                 return result
             result = {
                 "model": self.config.model,
-                "messages": [*fixed, *[m for group in chosen for m in group]],
+                "messages": messages,
                 "tools": tools,
                 "stream": False,
                 "think": False,
@@ -141,17 +145,13 @@ class ContextBuilder:
                 "content": summary["note"]
                 + f" Omitted {len(excluded)} groups; lineage {self.summary_ref}.",
             }
-            augmented = {**wire, "messages": [*fixed, note, *[m for g in chosen for m in g]]}
-            if self.config.provider == "openai":
-                from local_agent.models.openai import wire_messages
-
-                augmented["messages"] = wire_messages(augmented["messages"])
+            augmented = payload(chosen, note)
             if fits(augmented):
                 wire = augmented
         ref = self.blobs.put_json(wire)
         snapshot = ContextSnapshot(
-            messages=tuple(wire["messages"]),
-            tool_definitions=tools,
+            messages=tuple(wire.get("input", wire.get("messages", []))),
+            tool_definitions=tuple(wire.get("tools", [])),
             payload_ref=ref,
             payload_hash=digest(canonical(wire)),
             token_estimate=estimate(wire),

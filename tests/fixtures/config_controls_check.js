@@ -9,6 +9,7 @@ class Element {
   appendChild(node) { this.children.push(node); }
   addEventListener(event, fn) { this.handlers[event] = fn; }
   focus() {}
+  setAttribute(key, value) { this[key] = value; }
 }
 const nodes = {};
 globalThis.document = {getElementById: id => (nodes[id] ||= new Element())};
@@ -28,9 +29,49 @@ const profiles = [
 (0, eval)(imports.byteArray.toString(GLib.file_get_contents(ARGV[0])[1]));
 async function main() {
   const controls = window.ConfigControls;
-  controls.init(async () => ({profiles}), error => { throw new Error(error); });
+  const saved = [], errors = [];
+  let conflict = false;
+  controls.init(async (path, body) => {
+    if (path === '/configs') return {profiles};
+    if (path === '/configs/save') {
+      if (conflict) throw new Error('Profile changed elsewhere');
+      saved.push({...body});
+      if (!profiles.some(p => p.name === body.name)) profiles.push({...profiles[0], name: body.name});
+      return {hash:'updated-hash'};
+    }
+    if (path === '/configs/validate') return {valid:true};
+    return {name:decodeURIComponent(path.split('/').pop()), content:'model: local', hash:'original-hash', metadata:{valid:true}};
+  }, error => errors.push(error));
   await controls.refresh('coder.yaml', ['/repo']);
-  check(node('legacy-circuit-controls').hidden && node('netlist-btn').hidden && node('verify-btn').hidden, 'coder must hide legacy circuit actions/models');
+  await node('config-edit').handlers.click();
+  check(!node('config-editor-panel').hidden, 'Edit must open editor');
+  check(node('config-editing-file').textContent === 'coder.yaml', 'Edit must load selected run profile');
+  check(node('config-name-fields').hidden, 'Existing file must not ask for a second filename');
+  node('config-content').value = 'unsaved edit';
+  node('config-cancel').handlers.click();
+  check(node('config-editor-panel').hidden && !node('config-content').value, 'Cancel must discard and close');
+  check(saved.length === 0, 'Cancel must not write configuration');
+  await node('config-edit').handlers.click();
+  node('config-content').value = 'model: changed';
+  conflict = true;
+  await node('config-save').handlers.click();
+  check(!node('config-editor-panel').hidden && node('config-content').value === 'model: changed', 'Failed save must preserve edits');
+  check(errors.pop().includes('changed elsewhere'), 'Failed save must explain conflict');
+  conflict = false;
+  await node('config-save').handlers.click();
+  check(saved[0].name === 'coder.yaml' && saved[0].expected_hash === 'original-hash', 'Existing save must retain optimistic concurrency');
+  check(node('config-editor-panel').hidden, 'Successful save must close editor');
+  await node('config-edit').handlers.click();
+  node('config-content').value = 'model: copied';
+  await node('config-clone').handlers.click();
+  check(!node('config-name-fields').hidden, 'Save as new must request a filename');
+  check(saved.length === 1, 'Save as new must not write until Save');
+  await node('config-save').handlers.click();
+  check(saved[1].name !== 'coder.yaml' && !('expected_hash' in saved[1]), 'Copy must create another file without reusing old hash');
+  check(saved[1].content === 'model: copied', 'Copy must retain unsaved editor content');
+  node('config-select').value = 'coder.yaml'; node('config-select').handlers.change();
+  check(node('legacy-circuit-controls').hidden && node('netlist-btn').hidden, 'coder must hide circuit actions/models');
+  check(!node('verify-btn').hidden && !node('verifier-note').hidden && !node('reviewer-select').hidden, 'coder must show paid reviewer');
   check(!node('execution-fields').hidden, 'coder must show execution selector');
   check(!node('coding-fields').hidden, 'coder must show task controls');
   node('base-ref').value = 'topic~1'; node('working-directory').value = 'tests/fixtures/broken_repo';
@@ -49,6 +90,7 @@ async function main() {
   controls.busy(false); check(!node('execution-mode').disabled, 'idle mode must enable choice');
   node('config-select').value = 'analog.yaml'; node('config-select').handlers.change();
   check(node('legacy-circuit-controls').hidden, 'PDF circuit workflow must not offer screenshot netlist controls');
+  check(!node('verify-btn').hidden && !node('verifier-note').hidden, 'PDF profile must show paid reviewer');
   check(node('execution-mode').value === '', 'profile switch must clear previous override');
   check(node('execution-mode').options[0].textContent.includes('persistent'), 'analog default must be reflected');
   check(!node('circuit-fields').hidden && node('image-fields').hidden, 'analog must show PDF input');
@@ -68,6 +110,8 @@ async function main() {
   check(controls.requestFields().continue_workspace_id === 'ws_' + 'b'.repeat(32), 'continue action must restore workspace ID');
   node('config-select').value = 'coder.yaml'; node('config-select').handlers.change();
   check(node('execution-mode').value === '', 'returning to coder must use its default');
+  controls.continueTask({profile_name:'coder.yaml',execution_mode:'persistent',git_workspace:{repository:'/repo',workspace_id:'ws_123',branch:'agent/ws_123'}});
+  check(node('execution-mode').value==='persistent','continuation must preserve the workspace execution mode');
   print('Profile visibility and execution mode checks passed');
 }
 const loop = new GLib.MainLoop(null, false);

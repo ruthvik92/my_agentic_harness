@@ -1,5 +1,8 @@
 # The local agent harness in five minutes
 
+For the browser workflow and the meaning of workspaces, runs, candidates and
+previews, use the [functional instruction manual](functional-manual.md).
+
 This project is a coding agent you can run against a local repository. A model
 reads your task, proposes tool calls, examines results, edits an isolated copy,
 and proposes completion. The harness controls execution, retains evidence and,
@@ -19,7 +22,8 @@ For coding against a Git repository root, `project` is a linked host worktree
 on an `agent/ws_<id>` branch, starting from current `HEAD` or a selected commit.
 **Continue task** reuses the previous worktree and pending changes; a separate
 **Working subdirectory** focuses the agent within the repository. Other folders
-use a copied project. Other workspace roots are `memory`, `tools`, `scratch`
+are initialized as repositories for coding tasks. Noncoding workflows use copied
+projects. Other workspace roots are `memory`, `tools`, `scratch`
 and `outputs`. Your current checkout and pending edits stay untouched. The host
 publishes a candidate commit and retains a protected final diff; review and
 merge remain explicit. See [Git workspaces](git-workspaces.md).

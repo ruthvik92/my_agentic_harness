@@ -9,7 +9,6 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from local_agent.storage.blobs import canonical, fsync_directory, private_directory
 
@@ -52,12 +51,17 @@ async def lease(path, *, wait=True):
 
 
 class ExecutionManager:
-    def __init__(self, store, workspaces, image, settings, *, docker, attest, emit):
+    def __init__(self, store, workspaces, image, settings, *, docker, attest, emit, cleanup_attest=None):
         self.store, self.workspaces, self.image = store, workspaces, image
         self.settings, self.docker, self.attest, self.emit = settings, docker, attest, emit
+        self.cleanup_attest = cleanup_attest or attest
         self.directory = store.control / "containers"
         private_directory(self.directory)
         self.owner = hashlib.sha256(str(store.control.resolve()).encode()).hexdigest()
+
+    def container_name(self, workspace_id):
+        self.path(workspace_id)
+        return "local-agent-" + self.owner[:12] + "-" + workspace_id
 
     def path(self, workspace_id, *, allow_missing=False):
         self.workspaces.path(workspace_id, allow_missing=allow_missing)
@@ -132,7 +136,9 @@ class ExecutionManager:
             or labels.get("local-agent.workspace") != record["workspace_id"]
         ):
             raise PermissionError("persistent container ownership mismatch")
-        self.attest(info, self.workspaces.path(record["workspace_id"], allow_missing=cleanup))
+        (self.cleanup_attest if cleanup else self.attest)(
+            info, self.workspaces.path(record["workspace_id"], allow_missing=cleanup)
+        )
 
     async def remove(self, record, *, kill=False):
         """Caller holds the workspace lease. Never select a container by name."""
@@ -140,6 +146,8 @@ class ExecutionManager:
             info = await self.inspect(record["container_id"])
             if info is not None:
                 self.verify(info, record, cleanup=True)
+                if info["State"].get("Paused"):
+                    await self.docker("unpause", record["container_id"])
                 if info["State"]["Running"]:
                     record["state"] = "STOPPING"
                     self.save(record)
@@ -176,14 +184,28 @@ class ExecutionManager:
         if previous:
             info = await self.inspect(previous["container_id"])
             if info is not None:
-                self.verify(info, previous)
+                self.verify(info, previous, cleanup=True)
+                if info["State"].get("Paused") and previous.get("snapshot_paused"):
+                    await self.docker("unpause", previous["container_id"])
+                    previous.pop("snapshot_paused", None)
+                    self.save(previous)
+                    info = await self.inspect(previous["container_id"])
                 reusable = (
                     previous["config_fingerprint"] == fingerprint
                     and not previous.get("active_execution_id")
                     and previous["state"] == "IDLE"
                     and info["State"]["Running"]
+                    and not info["State"].get("Paused")
+                    and time.time() - datetime.fromisoformat(previous["last_used_at"]).timestamp()
+                    < previous["idle_timeout"]
                 )
                 if reusable:
+                    self.verify(info, previous)
+                    name = self.container_name(workspace_id)
+                    if info.get("Name", "").lstrip("/") != name:
+                        await self.docker("rename", previous["container_id"], name)
+                    previous["container_name"] = name
+                    self.save(previous)
                     return previous
                 await self.remove(previous, kill=True)
 
@@ -191,7 +213,7 @@ class ExecutionManager:
             if len(await self.owned()) >= self.settings.max_persistent_containers:
                 raise RuntimeError("persistent container capacity reached")
             container_id = (await self.docker(
-                "create", "--name", "local-agent-session-" + uuid4().hex,
+                "create", "--name", self.container_name(workspace_id),
                 "--label", "local-agent.owner=" + self.owner,
                 "--label", "local-agent.mode=persistent",
                 "--label", "local-agent.workspace=" + workspace_id,
@@ -200,6 +222,7 @@ class ExecutionManager:
             )).decode().strip()
             record = {
                 "workspace_id": workspace_id, "container_id": container_id,
+                "container_name": self.container_name(workspace_id),
                 "owner": self.owner, "image": self.image,
                 "config_fingerprint": fingerprint, "state": "CREATED",
                 "created_at": utc_now(), "last_used_at": utc_now(),
@@ -237,6 +260,44 @@ class ExecutionManager:
                 self.event("container.failed", {**record, "state": "FAILED"},
                            error="persistent startup failed")
                 raise
+
+    @asynccontextmanager
+    async def snapshot(self, workspace_id):
+        """Freeze a keeper while host code captures a consistent task snapshot."""
+        self.path(workspace_id)
+        async with lease(self.directory / (workspace_id + ".lock")):
+            record = self.load(workspace_id)
+            if not record or record["state"] == "REMOVED":
+                yield
+                return
+            info = await self.inspect(record["container_id"])
+            if info is None:
+                yield
+                return
+            self.verify(info, record)
+            if record.get("active_execution_id") or record["state"] != "IDLE":
+                raise RuntimeError("Workspace has an unresolved active container execution")
+            if not info["State"]["Running"]:
+                yield
+                return
+            if info["State"].get("Paused") and not record.get("snapshot_paused"):
+                raise RuntimeError("Workspace container was paused outside the harness")
+            # Persist intent before pausing; recovery may see either side of the Docker call.
+            record["snapshot_paused"] = True
+            self.save(record)
+            try:
+                if not info["State"].get("Paused"):
+                    await self.docker("pause", record["container_id"])
+                yield
+            finally:
+                current = await self.inspect(record["container_id"])
+                if current is not None:
+                    self.verify(current, record)
+                    if current["State"].get("Paused"):
+                        await self.docker("unpause", record["container_id"])
+                record.pop("snapshot_paused", None)
+                record["last_used_at"] = utc_now()
+                self.save(record)
 
     @asynccontextmanager
     async def session(self, workspace_id, run_id, execution_id, create_args):

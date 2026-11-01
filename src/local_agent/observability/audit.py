@@ -118,7 +118,7 @@ def audit(store, run_id) -> dict:
             )
             payload = store.blobs.json(snapshot.payload_ref)
             _require(
-                canonical({"messages": payload["messages"], "tools": payload.get("tools", [])})
+                canonical({"messages": payload.get("input", payload.get("messages", [])), "tools": payload.get("tools", [])})
                 == canonical({"messages": snapshot.messages, "tools": snapshot.tool_definitions}),
                 "context payload mismatch",
             )
@@ -126,6 +126,12 @@ def audit(store, run_id) -> dict:
                 response = load(ModelResponse, row["response_ref"])
                 _require(response.request_id == request.request_id, "invariant failed")
                 raw = store.blobs.json(response.original_response_ref)
+                if "output" in raw:
+                    from local_agent.models.responses import (
+                        normalize_response as normalize_responses,
+                    )
+
+                    raw = normalize_responses(raw)
                 if "choices" in raw:
                     from local_agent.models.openai import normalize_response
 
@@ -222,6 +228,7 @@ def audit(store, run_id) -> dict:
                     arguments,
                     version=call.tool_version,
                     legacy_evidence="evidence_ref" in saved["arguments"],
+                    pids_limit=config.get("agent", {}).get("execution", {}).get("container_pids_limit", 128),
                 )
                 _require(
                     canonical(normalized) == store.blobs.read(row["validated_ref"]),

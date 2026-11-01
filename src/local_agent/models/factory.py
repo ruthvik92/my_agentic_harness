@@ -13,13 +13,18 @@ def create_provider(blobs, config):
 
 
 def assistant_message(raw, response):
+    if "output" in raw:
+        return {"role": "assistant", "content": response.text, "response_output": raw["output"]}
     if "choices" in raw:
         return raw["choices"][0]["message"]
     return raw.get("message") or {
         "role": "assistant",
         "content": response.text,
         "tool_calls": [
-            {"function": {"name": call.name, "arguments": call.arguments}}
+            {
+                "function": {"name": call.name, "arguments": call.arguments},
+                **({"id": call.provider_id, "type": "function"} if call.provider_id else {}),
+            }
             for call in response.tool_calls
         ],
     }

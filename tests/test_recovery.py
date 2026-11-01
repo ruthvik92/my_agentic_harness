@@ -44,7 +44,7 @@ def test_real_controller_crashes_never_replay_uncertain_mutations(tmp_path, requ
     )
     agent = Agent(
         store,
-        load_config(Path("config/coder.yaml")),
+        load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False}),
         {**sandbox_config(), "image": image},
         provider=provider,
     )
@@ -132,7 +132,7 @@ def test_cancellation_stops_active_boundary(tmp_path, request, during):
     source.mkdir()
     agent = Agent(
         store,
-        load_config(Path("config/coder.yaml")),
+        load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False}),
         {**sandbox_config(), "image": image},
         provider=provider,
     )

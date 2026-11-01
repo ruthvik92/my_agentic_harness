@@ -237,11 +237,21 @@ def main(argv=None):
             if not isinstance(request, dict):
                 raise ValueError("browser-run request must be a JSON object")
             request.pop("mode", None)
+            repair_context = request.pop("repair_context", None)
+            task_context = request.pop("task_context", None)
             config = load_config(args.agent)
             normalized = validate_browser_request(
                 request, config, args.allow_root or [Path.cwd()]
             )
-            result = asyncio.run(run_browser(store, config, normalized, sandbox_config()))
+            if repair_context is not None:
+                from local_agent.mobile.repair_controls import attach_repair_context
+
+                normalized = attach_repair_context(normalized, repair_context, config)
+            if task_context is not None:
+                from local_agent.mobile.task_context import attach
+
+                normalized = attach(normalized, task_context)
+            result = asyncio.run(run_browser(store, config, normalized, sandbox_config(), progress_path=request_path.with_name("progress.json")))
             print(json.dumps(result, indent=2))
             return (
                 0

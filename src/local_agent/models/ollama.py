@@ -19,10 +19,20 @@ USAGE_FIELDS = (
 )
 
 
+def error_detail(body):
+    """Only the retained provider error field, not echoed request/response content."""
+    try:
+        value = json.loads(body)
+    except (ValueError, TypeError):
+        return ""
+    return str(value["error"])[:1200] if isinstance(value, dict) and value.get("error") else ""
+
+
 class ProviderResponseError(RuntimeError):
-    def __init__(self, message, raw_ref):
+    def __init__(self, message, raw_ref, *, recoverable_tool_error=False):
         super().__init__(message)
         self.raw_ref = raw_ref
+        self.recoverable_tool_error = recoverable_tool_error
 
 
 class OllamaProvider:
@@ -96,13 +106,17 @@ class OllamaProvider:
             ) from exc
         raw_ref = self.blobs.put(bytes(data))
         if response_status != 200:
-            raise ProviderResponseError(f"Ollama HTTP status {response_status}", raw_ref)
+            detail = error_detail(data)
+            raise ProviderResponseError(
+                f"Ollama HTTP status {response_status}" + (": " + detail if detail else ""), raw_ref,
+                recoverable_tool_error=response_status == 500 and "invalid tool call arguments" in detail,
+            )
         try:
             raw = json.loads(data)
             if raw.get("done_reason") == "length":
                 raise ProviderResponseError(
                     f"Ollama output token limit reached (eval_count={raw.get('eval_count')}); partial response was not dispatched",
-                    raw_ref,
+                    raw_ref, recoverable_tool_error=True,
                 )
             if raw.get("error") or not raw.get("done"):
                 raise ProviderResponseError("incomplete/failed Ollama response", raw_ref)

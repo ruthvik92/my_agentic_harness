@@ -2,7 +2,7 @@
   'use strict';
   let api = null, showError = null, onChange = null, bound = false;
   let profiles = [], selected = null, editorName = null;
-  let loadedName = null, loadedHash = null, requestActive = false, jobDisabled = false;
+  let loadedName = null, loadedHash = null, creating = false, requestActive = false, jobDisabled = false;
   const el = (id) => document.getElementById(id);
   const isInt = (v) => Number.isInteger(v);
   const strictInt = (s) => /^\d+$/.test(String(s).trim()) ? parseInt(String(s).trim(), 10) : NaN;
@@ -11,7 +11,7 @@
   function setStatus(text) { el('config-status').textContent = text; }
   function applyDisabled() {
     const d = requestActive || jobDisabled;
-    ['config-select', 'config-editor-file', 'config-name', 'config-content', 'config-new',
+    ['config-edit', 'config-cancel', 'config-select', 'config-editor-file', 'config-name', 'config-content', 'config-new',
      'config-clone', 'config-load', 'config-validate', 'config-save', 'config-refresh',
      'workspace-input', 'pdf-input', 'page-input', 'dpi-input', 'context-page-input',
      'region-input', 'model-select', 'execution-mode', 'task-mode', 'base-ref',
@@ -32,18 +32,15 @@
     el('continue-task-fields').hidden = !continuing;
     el('image-fields').hidden = mode === 'circuit';
     const legacyCircuit = mode === 'chat';
-    ['legacy-circuit-controls', 'netlist-btn', 'verify-btn', 'verifier-note'].forEach(id => {
+    ['legacy-circuit-controls', 'netlist-btn'].forEach(id => {
       el(id).hidden = !legacyCircuit;
     });
     el('execution-fields').hidden = !selected || !Array.isArray(selected.tools) || selected.tools.length === 0;
   }
   function detailText(p) {
     if (!p) return 'No valid agent profile available.';
-    const parts = ['kind: ' + p.kind, 'valid: ' + (p.valid ? 'yes' : 'no'), 'mode: ' + (p.mode || '-'),
-      'provider: ' + (p.provider || '-'), 'model: ' + (p.model || '-'),
-      'instructions: ' + (p.instructions_version || '-'), 'tools: ' + (p.tools || '-')];
-    if (p.error) parts.push('error: ' + p.error);
-    return parts.join(' | ');
+    return [p.model || 'No model configured', p.mode || '',
+      p.error ? 'Error: ' + p.error : ''].filter(Boolean).join(' · ');
   }
   function selectRun(name) {
     selected = profiles.find((x) => x.name === name && x.kind === 'agent' && x.valid) || null;
@@ -93,16 +90,41 @@
       i += 1;
     }
   }
+  function showEditor(visible) {
+    el('config-editor-panel').hidden = !visible;
+    el('config-edit').setAttribute('aria-expanded', String(visible));
+    if (visible) el('config-content').focus();
+  }
+  function closeEditor() {
+    showEditor(false);
+    el('config-content').value = '';
+    el('config-name').value = '';
+    el('config-name-fields').hidden = true;
+    loadedName = null; loadedHash = null; creating = false;
+    setStatus('');
+    el('config-edit').focus();
+  }
+  function editorTarget() { return creating ? el('config-name').value : loadedName; }
   async function loadEditorFile(name) {
     const res = await api('/configs/' + encodeURIComponent(name));
     el('config-name').value = res.name;
     el('config-content').value = res.content;
-    loadedName = res.name; loadedHash = res.hash;
+    loadedName = res.name; loadedHash = res.hash; creating = false;
+    selectEditor(res.name);
+    el('config-name-fields').hidden = true;
+    el('config-editing-file').textContent = res.name;
+    el('config-editor-title').textContent = 'Edit profile';
+    showEditor(true);
     const md = res.metadata || {};
     setStatus('Loaded ' + res.name + (md.valid ? '' : ' (invalid)') + (md.error ? ': ' + md.error : ''));
   }
   function bind() {
     if (bound) return; bound = true;
+    el('config-edit').addEventListener('click', () => guarded(async () => {
+      if (!selected) throw new Error('Select an agent profile first');
+      await loadEditorFile(selected.name);
+    }));
+    el('config-cancel').addEventListener('click', closeEditor);
     el('task-mode').addEventListener('change', updateVisibility);
     el('config-select').addEventListener('change', () => {
       selectRun(el('config-select').value);
@@ -115,27 +137,36 @@
       await loadEditorFile(editorName);
     }));
     el('config-new').addEventListener('click', () => {
+      creating = true; el('config-name-fields').hidden = false;
+      el('config-editing-file').textContent = 'New profile (unsaved)';
+      el('config-editor-title').textContent = 'New profile';
+      showEditor(true);
       el('config-name').value = ''; el('config-content').value = '';
       loadedName = null; loadedHash = null; setStatus('New profile (unsaved).');
     });
     el('config-clone').addEventListener('click', () => guarded(async () => {
-      if (editorName && loadedName !== editorName) await loadEditorFile(editorName);
+      if (!loadedName && !creating && editorName) await loadEditorFile(editorName);
       el('config-name').value = uniqueName(el('config-name').value || editorName || 'profile.yaml');
-      loadedName = null; loadedHash = null; setStatus('Cloned (unsaved).');
+      creating = true; el('config-name-fields').hidden = false;
+      el('config-editor-title').textContent = 'Save as new profile';
+      setStatus('Choose a new filename, then click Save.');
+      el('config-name').focus();
     }));
     el('config-validate').addEventListener('click', () => guarded(async () => {
-      const res = await api('/configs/validate', { name: el('config-name').value, content: el('config-content').value });
+      const res = await api('/configs/validate', { name: editorTarget(), content: el('config-content').value });
       if (res && res.valid) setStatus('Validation OK: ' + (res.message || res.name || ''));
       else setStatus('Validation failed: ' + ((res && (res.error || res.message)) || 'invalid'));
     }));
     el('config-save').addEventListener('click', () => guarded(async () => {
-      const name = el('config-name').value, content = el('config-content').value;
+      const name = editorTarget(), content = el('config-content').value;
+      if (!name) throw new Error('Enter a profile filename');
       const body = { name, content };
-      if (loadedName && loadedHash && loadedName === name) body.expected_hash = loadedHash;
+      if (!creating && loadedName && loadedHash && loadedName === name) body.expected_hash = loadedHash;
       const res = await api('/configs/save', body);
       loadedName = name; loadedHash = (res && res.hash) || loadedHash;
       selected = null; editorName = name;
       await refresh(name, window.__allowedRoots || []);
+      closeEditor();
     }));
     el('config-refresh').addEventListener('click', () => guarded(async () => {
       await refresh(el('config-select').value, window.__allowedRoots || []);
@@ -256,6 +287,7 @@
       el('task-mode').value = 'continue';
       el('continue-workspace').value = git.workspace_id || git.branch.replace(/^agent\//, '');
       el('working-directory').value = result.working_directory || git.working_directory || '';
+      if (['persistent','ephemeral'].includes(result.execution_mode)) el('execution-mode').value=result.execution_mode;
       updateVisibility();
       el('continue-workspace').focus();
     }

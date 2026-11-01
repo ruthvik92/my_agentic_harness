@@ -42,7 +42,7 @@ def crash(boundary):
 
 
 store = Store(Path(root))
-config = load_config(Path("config/coder.yaml"))
+config = load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False})
 config = config.model_copy(
     update={"tools": tuple(dict.fromkeys((*config.tools, "view_image")))}
 )

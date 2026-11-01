@@ -1,4 +1,4 @@
-"""OpenAI-compatible Chat Completions, with exact wire capture and external secrets."""
+"""OpenAI Chat Completions/Responses with exact wire capture and external secrets."""
 
 import json
 import os
@@ -66,12 +66,13 @@ class OpenAIProvider:
     async def generate(self, request):
         snapshot = self.blobs.json(request.context_ref)
         payload = self.blobs.read(snapshot["payload_ref"])
+        responses = "input" in self.blobs.json(snapshot["payload_ref"])
         started = time.monotonic()
         data = bytearray()
         try:
             async with self.client.stream(
                 "POST",
-                "chat/completions",
+                "responses" if responses else "chat/completions",
                 content=payload,
                 headers={"Content-Type": "application/json"},
             ) as response:
@@ -96,13 +97,26 @@ class OpenAIProvider:
                     or error.get("code") in {"insufficient_quota", "credit_balance_exhausted"}
                 ):
                     message += ": API credit balance/quota exhausted. Check OpenAI project billing before requesting another review."
+                elif status == 400:
+                    parameter = error.get("param")
+                    if isinstance(parameter, str) and parameter.replace("_", "").isalnum():
+                        message += ": invalid request parameter " + parameter[:80] + ". Inspect the captured provider error in the trace."
             except (ValueError, TypeError, AttributeError):
                 pass
             raise ProviderResponseError(message, ref)
         try:
             raw = json.loads(data)
-            normalized = normalize_response(raw)
+            if responses:
+                from local_agent.models.responses import normalize_response as normalize_responses
+
+                normalized = normalize_responses(raw)
+            else:
+                normalized = normalize_response(raw)
             usage = raw.get("usage") or {}
+            if responses:
+                usage = {**usage, "prompt_tokens": usage.get("input_tokens"),
+                         "completion_tokens": usage.get("output_tokens"),
+                         "prompt_tokens_details": usage.get("input_tokens_details") or {}}
             return ModelResponse.model_validate_json(
                 canonical(
                     {

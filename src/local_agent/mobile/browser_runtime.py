@@ -46,7 +46,7 @@ def _build_task(request: dict) -> str:
     return task
 
 
-async def run_browser(store, config, request, sandbox, provider=None):
+async def run_browser(store, config, request, sandbox, provider=None, progress_path=None):
     mode = request.get("mode")
     agent_cls = _select_agent(mode, config)
 
@@ -57,6 +57,7 @@ async def run_browser(store, config, request, sandbox, provider=None):
     kwargs = dict(
         provider=provider,
         capability_report=report,
+        progress_path=progress_path,
     )
 
     workspace = request.get("workspace")
@@ -71,15 +72,23 @@ async def run_browser(store, config, request, sandbox, provider=None):
         task = _build_task(request)
     else:
         request_subset = {
-            key: request[key]
-            for key in ("question", "history", "image")
-            if key in request
+            key: request[key] for key in ("question", "history", "image") if key in request
         }
         kwargs["request"] = request_subset
         if mode == "coding":
             from local_agent.workspace.options import FIELDS
 
             kwargs["workspace_options"] = {key: request[key] for key in FIELDS if key in request}
+            if request.get("task_context") is not None:
+                from local_agent.mobile.task_context import attach
+
+                attach(request, request["task_context"])
+                kwargs["task_context"] = request["task_context"]
+            if request.get("repair_context") is not None:
+                from local_agent.mobile.repair_controls import attach_repair_context
+
+                attach_repair_context(request, request["repair_context"], config)
+                kwargs["repair_context"] = request["repair_context"]
         task = request.get("question")
 
     with contextlib.ExitStack() as stack:
@@ -111,9 +120,7 @@ async def run_browser(store, config, request, sandbox, provider=None):
     if (
         getattr(store, "healthy", False)
         and result.get("run_id")
-        and store.db.execute(
-            "SELECT 1 FROM runs WHERE id=?", (result["run_id"],)
-        ).fetchone()
+        and store.db.execute("SELECT 1 FROM runs WHERE id=?", (result["run_id"],)).fetchone()
     ):
         result["audit"] = audit(store, result["run_id"])
         store.export_jsonl(result["run_id"])

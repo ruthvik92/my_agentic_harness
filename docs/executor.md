@@ -1,5 +1,9 @@
 # Docker execution lifecycle
 
+Models can request missing tooling through a separate preparation phase; see
+[model-requested environments](environment-preparation.md). This does not enable
+networking in ordinary execution containers.
+
 See also: [executor/README.md](executor/README.md) — developer guide for the executor package.
 
 Container lifecycle belongs to the host harness. The LLM proposes tools; it cannot
@@ -47,6 +51,7 @@ execution:
 | `max_persistent_containers` | 4 | Capacity per data-root owner, 1–64 |
 | `container_memory_limit` | 4096 | MiB, 64–4096 |
 | `container_cpu_limit` | 4 | Integer CPU equivalents, 1–4 |
+| `container_pids_limit` | 128 | Linux tasks (processes and threads), integer 64–1024 |
 | `container_network_enabled` | false | Current offline policy rejects `true` |
 
 Omitting `execution` preserves existing behavior. To explicitly select ephemeral
@@ -67,12 +72,19 @@ future runs; recovery uses the original frozen configuration. Persistent mode is
 opt-in for coding until its behavior has been evaluated on your tasks.
 
 New tasks import a new workspace. Git task continuation reuses the previous
-worktree and files with a fresh run ID, stopping any retained keeper first.
+worktree and a compatible healthy keeper, with a fresh run ID for each attempt.
+The keeper's name includes its owner/workspace identity. Legacy UUID-named idle
+keepers are renamed on reuse, retaining the same container ID. Snapshot leases
+pause/unpause the keeper while host baselines and completion checks/candidates
+are captured; `/tmp` and background processes survive continuation. Background
+jobs are suspended during these guards, including the bounded independent checks.
+Incompatible image/resource settings, expiry or an unhealthy keeper cause replacement.
 Resuming an interrupted run retains its workspace and recovery semantics.
 The execution manager can reuse the same workspace across run IDs.
 Workspace locks serialize commands and cleanup; different workspaces never share
 keepers. The existing one-coding-run-per-data-root lease remains in effect.
-Trusted bootstrap, diff export, and verification work use ephemeral containers.
+Trusted bootstrap, diff export, independent checks and review copies use ephemeral
+containers and do not accumulate persistent keepers during repeated iterations.
 
 ## Host ownership, cleanup, and recovery
 
@@ -158,7 +170,7 @@ The build pins the base/image digests and trusted worker fingerprints in
 `config/sandbox.json`. Rebuild after worker changes. Both modes retain non-root
 UID/GID, read-only root, offline networking, no GPU/devices/Docker socket,
 dropped capabilities, no privilege escalation, default seccomp, no swap,
-128 processes, a 128 MiB `/tmp` tmpfs, and exactly one scoped workspace mount.
+an operator-bounded task limit (128 by default), a 128 MiB `/tmp` tmpfs, and exactly one scoped workspace mount.
 The host attests Docker settings; the worker checks actual cgroup protections.
 
 Tools run from a fixed trusted image path. Workspace import rejects symlinks and
@@ -171,3 +183,52 @@ is a soft monitor (1 GiB / 100,000 entries) during executions, not a filesystem
 quota; idle background processes are not continuously disk-monitored. Docker
 shares the host kernel. Persistence improves state retention and startup costs;
 it does not by itself improve a model's reasoning or verified task success rate.
+
+
+`run_command.cwd` selects a directory inside Docker. `cwd: "project"` maps to
+`/workspace/project`; omitting it uses the task directory. It is not a command or
+a host path. `argv` runs directly without shell expansion, so environment settings
+use an executable such as `env`. The host validates the tool request before Docker
+runs it, then returns captured output, exit status and retained-evidence references
+to the model. Validation errors return corrective feedback without execution.
+
+
+## Process/thread exhaustion
+
+For a browser-heavy task you can set the limit in the browser profile editor:
+
+```yaml
+execution:
+  execution_mode_default: persistent
+  container_pids_limit: 256
+```
+
+This changes future runs, not a running or frozen attempt. Model tool arguments
+cannot raise it. Memory and CPU grants remain separate. Threads count toward
+Docker's PID limit, so free RAM does not imply available task slots.
+
+The host samples the inspected container's cgroup `pids.current`, `pids.max`,
+`pids.events`, and optionally `pids.peak`. Historical peaks or old rejected-fork
+counts alone do not turn an ordinary exit 1 into a resource failure. A full cgroup
+or a newly rejected fork on a failed execution produces `process_limit`, a clear
+error, resource measurements, and `execution.resource_limited` evidence. This
+works when the full container cannot start another worker. For remote daemons,
+Docker stats provide a full-container fallback on failure; short-lived spikes
+cannot always be measured when host cgroup access is unavailable.
+
+An exhausted persistent keeper is removed. Its workspace files and selected
+immutable environment image remain; the next new command creates a keeper with
+that image. The failed command is **never automatically replayed**, and arbitrary
+command side effects remain unknown. Published results are reconciled after an
+interruption; missing results still require reconciliation.
+
+Prepared images from older workers remain usable with the default 128-task
+setting. To use a different limit with an old prepared image, start a new task
+from the desired workspace commit and prepare its environment using the current
+sandbox worker. The harness reports this incompatibility before dispatching a
+continuation. New headless preparations install a launcher with immediate
+`--help` and process-group cleanup, including launcher SIGKILL. Refresh an old
+launcher by requesting `prepare_environment` with `headless_browser` again.
+Browser test clients should use unique profiles and CDP ports, wait for readiness,
+and terminate and await `harness-browser` in a finally block. Raw Chromium shell
+wrappers do not provide the launcher's cleanup guarantees.

@@ -172,21 +172,38 @@ class Models:
         reviewer["error"] = problem
         return reviewer
 
-    def select_reviewer(self, model_id=None):
+    def select_reviewer(self, model_id=None, *, workspace=False):
         cfg = self.verifier_config()
         model_id = model_id or "openai:" + cfg.model
         item = next((m for m in self.catalog()["verifier"]["models"] if m["id"] == model_id), None)
         if not item or not item["selectable"]:
             raise ValueError("Select an available OpenAI reviewer from the catalog")
         effort = REVIEW_MODELS[item["model"]][1]
-        return cfg.model_copy(
+        selected = cfg.model_copy(
             update={
                 "model": item["model"],
                 "reasoning_effort": effort,
                 "completion_token_field": "max_completion_tokens",
-                "output_reserve_tokens": 16384 if effort else 4096,
+                "output_reserve_tokens": min(cfg.output_reserve_tokens, 16384 if effort else 4096),
             }
         )
+
+        if workspace:
+            from local_agent.config import instruction_text
+            from local_agent.mobile.review_instructions import REVIEW_TOOLS
+            from local_agent.storage.blobs import digest
+
+            selected = selected.model_copy(update={
+                "instructions_version": "workspace-review-v1",
+                "instructions_hash": digest(instruction_text("workspace-review-v1").encode()),
+                "tools": REVIEW_TOOLS,
+                "execution": cfg.execution.model_copy(update={"execution_mode_default": "ephemeral"}),
+                "limits": selected.limits.model_copy(update={
+                    "max_model_turns": 30, "max_attempted_tool_calls": 100,
+                    "run_timeout_seconds": 1200,
+                }),
+            })
+        return selected
 
     def select(self, model_id=None, *, has_image=False):
         model_id = model_id or self.config.provider + ":" + self.config.model

@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="local-agent-browser-", dir=source) as d
             "status": "completed_unverified",
             "answer": (
                 "## Review\n\n**Unverified**\n\n| Part | Value |\n| --- | --- |\n| R1 | 10k |\n\n```spice\nR1 in out 10k\n```"
-                if captured[-1]["question"].startswith("Independently review")
+                if captured[-1]["question"].startswith("Review the saved conversation")
                 else "<script>safe text</script>"
             ),
             "run_id": None,
@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix="local-agent-browser-", dir=source) as d
         server.assets["/thread-controls.js"] = b""
         call("POST", prefix + "/url", {"url": f"http://127.0.0.1:{server.server_port}"})
         wait(
-            "return document.getElementById('error-banner').textContent.includes('Model controls could not load')"
+            "return document.getElementById('error-banner').textContent.includes('Browser controls could not load')"
         )
         assert js("return document.getElementById('login-btn').disabled")
         server.assets["/thread-controls.js"] = helper
@@ -219,7 +219,7 @@ with tempfile.TemporaryDirectory(prefix="local-agent-browser-", dir=source) as d
             "return !document.getElementById('preview-container').classList.contains('hidden')"
         )
         assert js(
-            "return document.getElementById('model-select').options[0].textContent.includes('vision')"
+            "return document.getElementById('model-select').options[0].textContent.includes('Use config model: qwen3.8:27b')"
         )
         js(
             "document.getElementById('inference-select').value='ollama:glm-4.7-flash:q8_0';document.getElementById('netlist-btn').click()"
@@ -308,7 +308,7 @@ with tempfile.TemporaryDirectory(prefix="local-agent-browser-", dir=source) as d
         assert js('return document.getElementById("transcript").textContent') == ""
         assert js("return localStorage.getItem('reviewer-select')") == "openai:gpt-6-luna"
         js(
-            "document.getElementById('thread-select').value=arguments[0];document.getElementById('thread-select').dispatchEvent(new Event('change'))",
+            "document.querySelector('#history-list button[data-thread-id=\"'+arguments[0]+'\"]').click()",
             saved_thread,
         )
         wait(

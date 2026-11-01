@@ -72,7 +72,7 @@ class DockerExecutor:
             "memory": host["Memory"] == self.settings.container_memory_limit * 1024 * 1024,
             "swap": host["MemorySwap"] == host["Memory"],
             "cpu": host["NanoCpus"] == self.settings.container_cpu_limit * 1000000000,
-            "pids": host["PidsLimit"] == 128,
+            "pids": host["PidsLimit"] == self.settings.container_pids_limit,
             "pid_namespace": host["PidMode"] == "",
             "devices": not host["Devices"] and not host["DeviceRequests"],
             "mount_scope": len(info["Mounts"]) == 1
@@ -88,9 +88,12 @@ class DockerExecutor:
         return {"checks": checks, "inspect": info, "workspace_disk_guarantee": "soft_monitor"}
 
     def make_manager(self, emit):
+        from local_agent.executor.maintenance import cleanup_attestor
+
         return ExecutionManager(
             self.store, self.workspaces, self.image, self.settings,
             docker=docker, attest=self.attest, emit=emit,
+            cleanup_attest=cleanup_attestor(self.store, self.workspaces),
         )
 
     def create_args(self, workspace):
@@ -101,7 +104,7 @@ class DockerExecutor:
             "--cpus", str(self.settings.container_cpu_limit),
             "--memory", f"{self.settings.container_memory_limit}m",
             "--memory-swap", f"{self.settings.container_memory_limit}m",
-            "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777",
+            "--pids-limit", str(self.settings.container_pids_limit), "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777",
             "--init", "--mount", f"type=bind,src={workspace},dst=/workspace",
             "--env", "HOME=/tmp", "--env", "LANG=C.UTF-8",
             "--env", "PYTHONDONTWRITEBYTECODE=1", "--log-driver", "local",
@@ -139,6 +142,8 @@ class DockerExecutor:
         ).fetchone()
         if row is None or row[0] != "started" or self.store.blobs.read(row[1]) != canonical(request):
             raise ValueError("executor requires a durable started attempt")
+        if request.effective_limits.pids != self.settings.container_pids_limit:
+            raise PermissionError("authorized process limit differs from executor settings")
         mode = execution_mode or self.settings.execution_mode_default
         if mode not in ("ephemeral", "persistent"):
             raise ValueError("unknown execution mode")
@@ -221,6 +226,14 @@ class DockerExecutor:
                     (info["Id"], request.execution_id),
                 )
             container_id = info["Id"]
+            from local_agent.executor.resources import PidsMonitor, exhausted
+
+            pids_monitor = PidsMonitor(info)
+            pids_before = pids_monitor.sample()
+            if mode == "ephemeral":
+                pids_before = {"current": 0, "limit": self.settings.container_pids_limit,
+                               "max_events": 0, "source": "fresh_container"}
+            pids_last = pids_before
             publish(self.store.control / "attempts" / (request.execution_id + ".container.json"), {
                 "execution_id": request.execution_id, "execution_mode": mode,
                 "container_id": container_id, "workspace_id": request.workspace_id,
@@ -256,8 +269,20 @@ class DockerExecutor:
                         exceeded.set()
 
             async def disk_monitor():
-                nonlocal status, resource_reason
+                nonlocal status, resource_reason, pids_last
                 while True:
+                    if not pids_monitor.info["State"].get("Pid"):
+                        pids_monitor.info = await self.inspect(name)
+                    sample = pids_monitor.sample()
+                    if sample:
+                        pids_last = sample
+                        if (exhausted(pids_before, sample, failed=True)
+                                and sample["current"] >= sample["limit"]
+                                and pids_before and sample["max_events"] > pids_before["max_events"]):
+                            resource_reason = "pids"
+                            status = "process_limit"
+                            exceeded.set()
+                            return
                     if self.store.db.execute(
                         "SELECT 1 FROM events WHERE run_id=? AND event_type='cancel.requested' LIMIT 1",
                         (run_id,),
@@ -316,16 +341,24 @@ class DockerExecutor:
                     "cpu_cores": self.settings.container_cpu_limit,
                     "environment": environment,
                 }
-                proc.stdin.write(canonical(payload))
-                await asyncio.wait_for(proc.stdin.drain(), timeout=min(timeout, 10))
-                proc.stdin.close()
+                # Old prepared images retain the default-only worker protocol.
+                if self.settings.container_pids_limit != 128:
+                    payload["_execution"]["pids_limit"] = self.settings.container_pids_limit
+                try:
+                    proc.stdin.write(canonical(payload))
+                    await asyncio.wait_for(proc.stdin.drain(), timeout=min(timeout, 10))
+                except (BrokenPipeError, ConnectionResetError):
+                    # docker exec can fail before reading stdin when the cgroup is full.
+                    pass
+                finally:
+                    proc.stdin.close()
                 if self.fault_hook:
                     self.fault_hook("after_container_launch")
                 done, _ = await asyncio.wait(
                     [waiter, flood], timeout=timeout, return_when=asyncio.FIRST_COMPLETED
                 )
                 if flood in done:
-                    if status != "cancelled":
+                    if status not in {"cancelled", "process_limit"}:
                         status = "output_limit"
                     await stop_command()
                 elif waiter not in done:
@@ -351,6 +384,33 @@ class DockerExecutor:
                 )
             if status == "succeeded" and exit_code:
                 status = "failed"
+            pids_after = pids_monitor.sample() or pids_last
+            if not pids_after and mode == "persistent" and exit_code:
+                # A remote Docker daemon may not share the controller's /proc.
+                # Stats are daemon-side and need no process in the full container.
+                try:
+                    raw = (await docker("stats", "--no-stream", "--format", "{{.PIDs}}",
+                                        container_id, timeout=10)).decode().strip()
+                    if re.fullmatch(r"[0-9]{1,20}", raw):
+                        pids_after = {"current": int(raw), "limit": self.settings.container_pids_limit,
+                                      "max_events": None, "source": "docker_stats"}
+                except (OSError, RuntimeError, TimeoutError):
+                    pass
+            if status not in {"cancelled", "output_limit"} and exhausted(
+                pids_before, pids_after, failed=bool(exit_code) or status == "timeout"
+            ):
+                status = "process_limit"
+            resource_usage = {"pids": {"before": pids_before, "after": pids_after,
+                                      "unavailable": pids_monitor.unavailable}}
+            process_error = None
+            if status == "process_limit":
+                process_error = (
+                    f"Docker process/thread limit reached ({self.settings.container_pids_limit} tasks). "
+                    "The exhausted container will be removed; workspace files and the selected image are preserved. "
+                    "This command was not replayed. Inspect its side effects before retrying."
+                )
+                emit("execution.resource_limited", {"container_id": container_id, "status": status,
+                     "resource": "pids", "resource_usage": resource_usage, "error": process_error})
             stdout, stderr = map(bytes, outputs)
             helper_ref = None
             if request.arguments.get("helper_manifest") and stdout.startswith(
@@ -374,7 +434,8 @@ class DockerExecutor:
                 command=tuple(request.arguments.get("argv", ())) or None,
                 started_at=started_at, completed_at=datetime.now(UTC).isoformat(),
                 duration_ms=(time.monotonic() - started) * 1000,
-                error=None if status == "succeeded" else "execution " + status,
+                error=process_error or (None if status == "succeeded" else "execution " + status),
+                resource_usage=resource_usage,
                 status=status,
                 exit_code=exit_code,
                 output_ref=self.store.blobs.put(combined),
@@ -403,6 +464,8 @@ class DockerExecutor:
             fsync_directory(directory)
             if self.fault_hook:
                 self.fault_hook("after_result_publication")
+            if status == "process_limit" and mode == "persistent":
+                await manager.terminate(request.workspace_id, container_id)
             return result
         except BaseException:
             if created:
@@ -421,7 +484,7 @@ class DockerExecutor:
 
     async def release(self, execution_id: str) -> None:
         row = self.store.db.execute(
-            "SELECT state,request_ref FROM execution_attempts WHERE id=?", (execution_id,)
+            "SELECT state,request_ref,result_ref FROM execution_attempts WHERE id=?", (execution_id,)
         ).fetchone()
         if row is None or row["state"] not in {"finished", "reconciled"}:
             return
@@ -430,6 +493,28 @@ class DockerExecutor:
         emit = self.emitter(run_id, call_id, execution_id, request.workspace_id)
         mapping = self.mapping(execution_id)
         if mapping and mapping["execution_mode"] == "persistent":
+            from local_agent.executor.lifecycle import lease, utc_now
+
+            manager = self.make_manager(emit)
+            async with lease(manager.directory / (request.workspace_id + ".lock")):
+                record = manager.load(request.workspace_id)
+                if record and record.get("active_execution_id") == execution_id:
+                    if record["container_id"] != mapping["container_id"]:
+                        raise PermissionError("Persistent recovery container changed")
+                    result = self.store.blobs.json(row["result_ref"]) if row["result_ref"] else {}
+                    if result.get("status") == "process_limit":
+                        await manager.terminate(request.workspace_id, record["container_id"])
+                        return
+                    info = await manager.inspect(record["container_id"])
+                    if info is not None:
+                        manager.verify(info, record)
+                    record.update(
+                        state="IDLE" if info and info["State"]["Running"] else "REMOVED",
+                        active_execution_id=None, last_used_at=utc_now(),
+                    )
+                    manager.save(record)
+                    if info is not None:
+                        manager.event("container.idle", {**record, "active_execution_id": execution_id})
             return
         name = mapping["container_id"] if mapping else "local-agent-" + execution_id
         manager = self.make_manager(emit)

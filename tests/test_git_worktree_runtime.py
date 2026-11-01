@@ -127,7 +127,7 @@ def test_worktree_resume_keeps_branch_and_does_not_repeat_mutation(tmp_path, req
     store = Store(root)
     try:
         run_id = store.db.execute("SELECT id FROM runs").fetchone()[0]
-        agent = Agent(store, load_config(Path("config/coder.yaml")),
+        agent = Agent(store, load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False}),
                       {**sandbox_config(), "image": image},
                       provider=ScriptedProvider(responses=(
                           {"text": "Recovered", "tool_calls": [], "finish_status": "stop"},

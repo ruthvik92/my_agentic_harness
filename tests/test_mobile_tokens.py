@@ -29,6 +29,41 @@ def row(route="local", **values):
     )
 
 
+def test_missing_run_usage_does_not_break_saved_chat_migration(tmp_path):
+    from test_mobile_web import login, running
+
+    from local_agent.mobile.jobs import publish
+    from local_agent.mobile.threads import Threads
+    from local_agent.storage.blobs import private_directory
+    from local_agent.storage.database import Store
+
+    root = tmp_path / "state"
+    Store(root).close()
+    threads = Threads(root)
+    tid = threads.create("Interrupted setup")
+    jid = "a" * 32
+    missing = "run_" + "b" * 32
+    threads.update(tid, pending_job=jid)
+    private_directory(root / "phone/jobs" / jid)
+    publish(root / "phone/jobs" / jid / "status.json", {
+        "job_id": jid, "thread_id": tid, "run_id": missing, "status": "failed", "mode": "coding",
+        "created": 0, "question": "Fix the game", "model": "local", "provider": "ollama",
+        "error": "Setup failed before a run was recorded",
+    })
+    for _ in range(2):
+        with running(root, lambda _: (_ for _ in ()).throw(AssertionError("must not replay"))) as (server, client):
+            login(server, client)
+            thread = client.get("/api/threads/" + tid).json()
+            assert thread["pending_job"] is None
+            assert len(thread["messages"]) == 2
+            assert "Setup failed" in thread["messages"][1]["content"]
+            usage = client.get("/api/usage").json()
+            assert usage["unavailable_jobs"] == 1
+            assert usage["requests"] == []
+            assert usage["totals"]["estimated_net_saved_tokens"] is None
+            assert usage["totals"]["estimated_all_openai_baseline"] is None
+
+
 def test_review_overhead_can_exceed_savings_and_cached_tokens_are_subset():
     local = row()
     review = dict(
@@ -161,3 +196,16 @@ def test_owner_usage_routes_persist_accounting_and_trace_once(tmp_path, monkeypa
         login(server, client)
         assert client.get(endpoint).json()["activity_runs"] == activity
         assert client.get("/api/usage").json()["totals"]["estimated_net_saved_tokens"] == 120
+
+
+def test_reasoning_breakdown_does_not_double_count_paid_output():
+    paid = row()
+    paid.update(route='openai', kind='workspace_review', input_tokens=30, output_tokens=20)
+    paid['reasoning_tokens'] = 12
+    result = totals([paid])
+    assert result['measured_openai_reasoning'] == 12
+    assert result['measured_openai_output'] == 20
+    assert result['measured_openai_total'] == 50
+    assert result['unknown_openai_reasoning'] == 0
+    del paid['reasoning_tokens']
+    assert totals([paid])['unknown_openai_reasoning'] == 1

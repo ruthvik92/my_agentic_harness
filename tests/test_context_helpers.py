@@ -29,6 +29,7 @@ def test_compaction_has_hashed_lineage_and_keeps_constraints(tmp_path):
         store.blobs.read(snapshot.exclusions[0]["source_ref"])
     )
     assert snapshot.messages[0] == fixed[0]
+    assert any("Older complete exchanges were omitted" in m.get("content", "") for m in snapshot.messages)
     assert not any(m["content"].startswith("x") for m in snapshot.messages)
     assert estimate(store.blobs.json(snapshot.payload_ref)) <= 6144
     store.close()

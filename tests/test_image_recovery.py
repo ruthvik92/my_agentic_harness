@@ -29,7 +29,7 @@ def test_image_survives_crash_after_result(tmp_path, request, point):
     assert result.returncode == 86
     store = Store(root)
     run_id = store.db.execute("SELECT id FROM runs").fetchone()[0]
-    config = load_config(Path("config/coder.yaml"))
+    config = load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False})
     config = config.model_copy(
         update={"tools": tuple(dict.fromkeys((*config.tools, "view_image")))}
     )

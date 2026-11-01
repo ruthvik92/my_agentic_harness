@@ -162,7 +162,7 @@ def test_browser_continues_actual_worktree_with_focused_commands_and_valid_audit
     if image is None:
         pytest.skip("requires --docker-image")
     source, first = repo
-    config = load_config(Path("config/coder.yaml"))
+    config = load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False})
     config = config.model_copy(update={"execution": config.execution.model_copy(
         update={"execution_mode_default": execution_mode}
     )})
@@ -234,7 +234,7 @@ def test_active_and_unknown_workspaces_are_rejected_without_modifying_candidate(
 
     source, _ = repo
     store = Store(tmp_path / "state")
-    config = load_config(Path("config/coder.yaml"))
+    config = load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False})
     old_run = new_id("run")
     workspaces = Workspaces(store.root)
     ws, root = workspaces.create_coding(source, old_run)

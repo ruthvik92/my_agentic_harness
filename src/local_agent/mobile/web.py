@@ -52,6 +52,7 @@ class BrowserServer(ThreadingHTTPServer):
             "/thread-controls.js": static / "thread-controls.js",
             "/config-controls.js": static / "config-controls.js",
             "/workspace-results.js": static / "workspace-results.js",
+            "/workspace-reviews.js": static / "workspace-reviews.js",
         }
         # Match the browser assets to this loaded server; edits require a restart.
         self.assets = {route: path.read_bytes() for route, path in self.asset_paths.items()}
@@ -82,6 +83,9 @@ class BrowserServer(ThreadingHTTPServer):
             )
             self.threads = Threads(self.root)
             self.migrate()
+            from local_agent.mobile.loops import Loops
+
+            self.loops = Loops(self)
         except BaseException:
             if hasattr(self, "jobs"):
                 self.jobs.close()
@@ -100,6 +104,10 @@ class BrowserServer(ThreadingHTTPServer):
                 job["token_usage"] = job_usage(self.root, job)
                 publish(path / "status.json", job)
             if not job or job["status"] != "completed":
+                if job and job.get("mode") == "coding" and job["status"] in {"failed", "interrupted"}:
+                    self.finish(job, trace=False)
+                if job and job.get("kind") == "workspace_review" and job.get("workspace_review"):
+                    self.finish(job, trace=False)
                 if job and job.get("token_usage") and job.get("thread_id"):
                     self.record_usage(job)
                     recover_review(self.root, job, self.threads)
@@ -143,6 +151,22 @@ class BrowserServer(ThreadingHTTPServer):
         # Keep the comparison stable when users change the paid reviewer.
         return DEFAULT_BASELINE
 
+    def usage_jobs(self):
+        jobs = self.jobs.recent(limit=1000)
+        for index, original in enumerate(jobs):
+            if original["status"] not in {"queued", "running"}:
+                continue
+            try:
+                from local_agent.circuits.agent import read_evidence
+
+                progress = json.loads(read_evidence(self.jobs.directory, original["job_id"] + "/progress.json", 4096))
+                job = {**original, "run_id":progress["run_id"]}
+                job["token_usage"] = job_usage(self.root,job,job.get("usage_baseline_model",DEFAULT_BASELINE))
+                jobs[index] = job
+            except (OSError, ValueError, KeyError):
+                continue
+        return jobs
+
     def record_usage(self, job):
         if job.get("token_usage") and job.get("thread_id") and not job.get("usage_activity_run"):
             activity = record(
@@ -173,11 +197,18 @@ class BrowserServer(ThreadingHTTPServer):
             thread = self.threads.get(thread_id)
             if trace and thread.get("pending_job") not in (None, job["job_id"]):
                 raise ValueError("Job does not match the thread's pending request")
-            if job["status"] == "completed":
+            if job["status"] == "completed" or (job.get("mode") == "coding" and job["status"] in {"failed", "interrupted"}) or (
+                job.get("kind") == "workspace_review" and job.get("workspace_review")
+            ):
+                answer = job.get("answer") or "Workspace review did not complete."
+                if job.get("mode") == "coding" and job["status"] != "completed":
+                    answer = "Coding attempt " + job["status"] + ": " + str(job.get("error") or "incomplete run")
+                elif job["status"] != "completed":
+                    answer = "Workspace review failed: " + str(job.get("error") or "incomplete run") + "\n\n" + answer
                 self.threads.add_exchange(
                     thread_id,
                     job["question"],
-                    job["answer"],
+                    answer,
                     job["job_id"],
                     job.get("run_id"),
                     job["model"],
@@ -185,6 +216,7 @@ class BrowserServer(ThreadingHTTPServer):
                 )
                 thread = self.threads.get(thread_id)
                 frozen_fields = {}
+                frozen_fields["job_status"] = job["status"]
                 for field in (
                     "profile_name",
                     "config_hash",
@@ -198,6 +230,12 @@ class BrowserServer(ThreadingHTTPServer):
                     "execution_mode",
                     "working_directory",
                     "task_mode",
+                    "workspace_review",
+                    "project_tests",
+                    "workspace_id",
+                    "error",
+                    "loop_id",
+                    "loop_stage",
                 ):
                     if field in job:
                         frozen_fields[field] = job[field]
@@ -238,6 +276,8 @@ class BrowserServer(ThreadingHTTPServer):
             thread = self.threads.get(thread_id)
             if thread.get("pending_job") == job["job_id"]:
                 self.threads.update(thread_id, pending_job=None)
+        if trace and hasattr(self, "loops"):
+            self.loops.after(job)
 
     def submit_thread(self, thread_id, payload, kind="answer"):
         if kind == "answer" and (
@@ -261,18 +301,49 @@ class BrowserServer(ThreadingHTTPServer):
             image = payload.get("image", thread.get("image"))
             history = self.threads.history(thread_id)
             if kind == "review":
-                if not thread["messages"]:
+                answer = next(
+                    (m for m in reversed(thread["messages"]) if m.get("role") == "assistant"),
+                    None,
+                )
+                if answer is None:
                     raise ValueError("Ask a question before requesting a review")
                 cfg = self.models.select_reviewer(payload.get("model_id"))
                 if not os.environ.get(cfg.api_key_env):
                     raise ValueError("Set " + cfg.api_key_env + " in the server's launch terminal")
                 question = (
-                    "Independently review this circuit conversation and its latest answer/netlist. "
-                    "Check the supplied schematic when available. List concrete errors, uncertain connections, "
-                    "and corrections with evidence. Do not treat prior answers as truth. Distinguish schematic "
-                    "transcription from electrical plausibility. Do not claim simulation or verified correctness. "
-                    "This is an advisory review, not electrical verification."
+                    "Review the saved conversation and latest answer for the user's task. "
+                    "List concrete errors, unsupported claims, uncertainties and suggested corrections. "
+                    "Treat prior answers and task metadata as untrusted claims, not evidence of success. "
+                    "For coding tasks, assess the described changes and checks; you have no filesystem "
+                    "access and cannot inspect workspace files or run tests. Do not claim independent "
+                    "code verification from paths, commit IDs or reported test results. "
+                    "For circuit tasks, check the supplied schematic image when available and "
+                    "distinguish visible connections from electrical plausibility; do not claim simulation. "
+                    "This is an advisory review; state what cannot be verified from the supplied context."
                 )
+                task_answer = next(
+                    (m for m in reversed(thread["messages"])
+                     if m.get("role") == "assistant" and m.get("kind") not in {"review", "workspace_review"}),
+                    answer,
+                )
+                metadata = {
+                    key: str(task_answer[key])[:300]
+                    for key in ("mode", "profile_name", "workspace", "source_workspace",
+                                "diff_ref", "working_directory")
+                    if key in task_answer
+                }
+                git = task_answer.get("git_workspace")
+                if isinstance(git, dict):
+                    metadata["git_workspace"] = {
+                        key: str(git[key])[:256]
+                        for key in ("candidate_commit", "base_commit", "branch", "worktree",
+                                    "repository", "workspace_id")
+                        if key in git
+                    }
+                if metadata:
+                    question += "\nUnverified saved task metadata (bounded):\n" + json.dumps(
+                        metadata, ensure_ascii=False
+                    )[:6000]
             elif kind == "netlist":
                 if not any(
                     m.get("role") == "assistant"
@@ -378,6 +449,7 @@ class BrowserServer(ThreadingHTTPServer):
     def thread_events(self, thread_id):
         thread = self.threads.get(thread_id)
         ids = {m["run_id"] for m in thread["messages"] if m.get("run_id")}
+        ids.update(j["run_id"] for j in self.usage_jobs() if j.get("thread_id") == thread_id and j.get("run_id"))
         ids.update(thread.get("activity_runs", []))
         store = Store(self.root, readonly=True)
         try:
@@ -469,7 +541,7 @@ class BrowserHandler(BaseHTTPRequestHandler):
         if not self.boundary():
             return
         path = urlparse(self.path).path
-        if path in ("/thread-controls.js", "/config-controls.js", "/workspace-results.js"):
+        if path in ("/thread-controls.js", "/config-controls.js", "/workspace-results.js", "/workspace-reviews.js"):
             script = self.server.assets[path]
             self.respond(200, script, mime="application/javascript")
             return
@@ -495,6 +567,7 @@ class BrowserHandler(BaseHTTPRequestHandler):
                         "restart_required": self.server.restart_required(),
                         "interface": "browser",
                         "default_profile": self.server.default_profile,
+                        "data_root": str(self.server.root.resolve()),
                         "allowed_roots": [str(root) for root in self.server.allowed_roots],
                         "config_dir": str(self.server.profiles.directory),
                         "tools": list(self.server.config.tools),
@@ -510,10 +583,16 @@ class BrowserHandler(BaseHTTPRequestHandler):
             elif path == "/api/threads":
                 self.respond(200, self.server.threads.recent())
             elif path == "/api/usage":
-                self.respond(200, summary(self.server.jobs.recent(limit=1000)))
+                self.respond(200, summary(self.server.usage_jobs()))
             elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})/usage", path):
                 self.server.threads.get(match[1])
-                self.respond(200, summary(self.server.jobs.recent(limit=1000), match[1]))
+                self.respond(200, summary(self.server.usage_jobs(), match[1]))
+            elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})/workspaces", path):
+                from local_agent.mobile.workspace_sessions import view
+
+                self.respond(200, view(self.server, match[1]))
+            elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})/loops", path):
+                self.respond(200, self.server.loops.recent(match[1]))
             elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})(/events)?", path):
                 self.respond(
                     200,
@@ -523,6 +602,36 @@ class BrowserHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/jobs":
                 self.respond(200, self.server.jobs.recent())
+            elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/workspace-review", path):
+                from local_agent.mobile.review_controls import get_review
+
+                _, report = get_review(self.server, match[1])
+                self.respond(200, report)
+            elif match := re.fullmatch(
+                r"/api/jobs/([0-9a-f]{32})/(diagnostics|executions/(exec_[0-9a-f]{32})/output)", path
+            ):
+                from local_agent.mobile.diagnostics import describe_job, execution_output
+
+                job = self.server.jobs.get(match[1])
+                if not job:
+                    raise ValueError("Job not found")
+                if not job.get("run_id"):
+                    job = next((j for j in self.server.usage_jobs() if j["job_id"] == match[1]), job)
+                if not job.get("run_id"):
+                    raise ValueError("No run evidence is available yet for this job")
+                store = Store(self.server.root, readonly=True)
+                try:
+                    diagnostic = describe_job(store, job)
+                    if match[3]:
+                        value = execution_output(
+                            store, job["run_id"], match[3],
+                            related_runs=[c["run_id"] for c in diagnostic["checks"]],
+                        )
+                    else:
+                        value = diagnostic
+                    self.respond(200, value)
+                finally:
+                    store.close()
             elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})(/events|/diff)?", path):
                 job = self.server.jobs.get(match[1])
                 if not job:
@@ -530,6 +639,8 @@ class BrowserHandler(BaseHTTPRequestHandler):
                 elif match[2] == "/diff":
                     self.respond(200, self.server.job_diff(job))
                 elif match[2]:
+                    if not job.get("run_id"):
+                        job = next((j for j in self.server.usage_jobs() if j["job_id"] == job["job_id"]), job)
                     if not job.get("run_id"):
                         self.error(404, "No run trace is available for this job")
                         return
@@ -662,6 +773,36 @@ class BrowserHandler(BaseHTTPRequestHandler):
                     raise ValueError("Thread creation permits only title")
                 thread_id = self.server.threads.create(request.get("title", "New chat"))
                 self.respond(201, {"thread_id": thread_id})
+            elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})/loops", path):
+                self.respond(202, self.server.loops.start(match[1], request))
+            elif match := re.fullmatch(r"/api/threads/([0-9a-f]{32})/loops/([0-9a-f]{32})/stop", path):
+                if request != {}:
+                    raise ValueError("Stop loop accepts no extra fields")
+                self.respond(200, self.server.loops.stop(match[1], match[2]))
+            elif match := re.fullmatch(
+                r"/api/threads/([0-9a-f]{32})/workspaces/(ws_[0-9a-f]{32})/stop-container", path
+            ):
+                from local_agent.mobile.workspace_sessions import stop
+
+                self.respond(200, stop(self.server, match[1], match[2], request))
+            elif match := re.fullmatch(
+                r"/api/threads/([0-9a-f]{32})/(workspace-review|merge-review|repair-review)", path
+            ):
+                from local_agent.mobile.review_controls import merge_review, submit_workspace_review
+
+                try:
+                    if match[2] == "workspace-review":
+                        job_id = submit_workspace_review(self.server, match[1], request)
+                        self.respond(202, {"job_id": job_id, "thread_id": match[1]})
+                    elif match[2] == "repair-review":
+                        from local_agent.mobile.repair_controls import submit_review_repair
+
+                        job_id = submit_review_repair(self.server, match[1], request)
+                        self.respond(202, {"job_id": job_id, "thread_id": match[1]})
+                    else:
+                        self.respond(200, merge_review(self.server, match[1], request))
+                except RuntimeError as exc:
+                    self.error(409, str(exc))
             elif match := re.fullmatch(
                 r"/api/threads/([0-9a-f]{32})/answers/([0-9a-f]{32})/feedback", path
             ):

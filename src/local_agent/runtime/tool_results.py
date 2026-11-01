@@ -8,6 +8,9 @@ def result_preview(store, result, tool=None):
         "preview": result.preview,
         "evidence_ref": result.output_ref,
         "truncated": result.truncated,
+        "error": result.error,
+        "resource_usage": result.resource_usage,
+        "side_effect_status": result.side_effect_status,
     }
     if tool != "register_tool" or result.status != "succeeded":
         return base

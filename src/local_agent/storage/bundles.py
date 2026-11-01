@@ -79,8 +79,16 @@ def roots(store, run_id):
             "response_ref",
             "input_ref",
             "validation_ref",
+            "stdout_ref",
+            "stderr_ref",
+            "result_ref",
+            "output_ref",
         ):
             add(event.data.get(key))
+        if event.event_type == "environment.preparing":
+            details = store.blobs.json(event.data["metadata_ref"])
+            for ref in details.get("manifest_refs", {}).values():
+                add(ref)
         if event.event_type == "context.compacted":
             for ref in event.data["inputs"]:
                 add(ref)

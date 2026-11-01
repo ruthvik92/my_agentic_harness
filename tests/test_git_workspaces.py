@@ -115,13 +115,74 @@ def test_symlink_and_subdirectory_behavior(repository, tmp_path):
     folder.mkdir()
     (folder / "plain.py").write_text("pass\n")
     ws, root = workspaces.create_coding(folder, "run_copy")
-    assert workspaces.git_info(ws) is None
+    assert workspaces.git_info(ws)["repository"] == str(folder)
+    assert (folder / ".git").is_dir()
     assert (root / "project/plain.py").is_file()
     (repository / "link").symlink_to("calculator.py")
     git("-C", repository, "add", "link")
     git("-C", repository, "commit", "-m", "Symlink")
     with pytest.raises(ValueError, match="symlinks/submodules"):
         workspaces.create_coding(repository, "run_symlink")
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_new_project_gets_git_baseline_and_can_continue(tmp_path, populated):
+    source = tmp_path / "new-project"
+    source.mkdir()
+    if populated:
+        (source / "game.txt").write_bytes(b"original\r\n")
+        (source / ".gitattributes").write_text("*.txt text eol=lf\n")
+        (source / ".gitignore").write_text("ignored/\n")
+        for name in (".venv", "__pycache__", "ignored"):
+            (source / name).mkdir()
+            (source / name / "cache").write_text("not source")
+    workspaces = Workspaces(tmp_path / "data")
+    ws, root = workspaces.create_coding(source, "run_first")
+    manager = GitWorktrees(workspaces)
+    record = manager.public(ws)
+    initial = git("-C", source, "rev-parse", "HEAD").decode().strip()
+    assert record["base_commit"] == initial
+    assert record["base_branch"] == "main"
+    assert record["repository"] == str(source)
+    if not populated:
+        assert not record["source_dirty"]
+    if populated:
+        assert git("-C", source, "show", "HEAD:game.txt") == b"original\r\n"
+        assert (source / "game.txt").read_bytes() == b"original\r\n"
+        assert (root / "project/game.txt").read_bytes() == b"original\r\n"
+        tracked = git("-C", source, "ls-tree", "-r", "--name-only", "HEAD")
+        assert b"cache" not in tracked
+    (root / "project/feature.txt").write_text("agent change\n")
+    snapshot = tmp_path / "candidate"
+    copy_tree(root / "project", snapshot, exclude=(".git",))
+    result = manager.finalize(ws, snapshot)
+    manager.continue_task(ws, source, "run_second")
+    assert manager.public(ws)["base_commit"] == result["candidate_commit"]
+    assert manager.public(ws)["run_id"] == "run_second"
+    assert git("-C", source, "rev-parse", "HEAD").decode().strip() == initial
+    assert not (source / "feature.txt").exists()
+
+
+def test_new_project_invalid_ref_or_nested_data_does_not_initialize_git(tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+    workspaces = Workspaces(tmp_path / "data")
+    with pytest.raises(ValueError, match="starting revision"):
+        workspaces.create_coding(source, "run_bad", base_ref="missing-branch")
+    assert not (source / ".git").exists()
+    nested = Workspaces(source / "data")
+    with pytest.raises(ValueError, match="data root must be outside"):
+        nested.create_coding(source, "run_nested")
+    assert not (source / ".git").exists()
+
+
+def test_new_project_symlink_does_not_leave_partial_git(tmp_path):
+    source = tmp_path / "project"
+    source.mkdir()
+    (source / "link").symlink_to(tmp_path / "outside")
+    with pytest.raises(ValueError, match="symlinks"):
+        Workspaces(tmp_path / "data").create_coding(source, "run_link")
+    assert not (source / ".git").exists()
 
 
 def test_copy_does_not_follow_a_replaced_project_root(tmp_path):

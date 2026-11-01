@@ -112,13 +112,18 @@ def _gather_source_run_ids(messages: list) -> list:
     return run_ids
 
 
-def submit_profile_turn(server, thread_id, payload):
+def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task_context=None,
+                        config_override=None, force_tests=False, extra_metadata=None):
     """Submit an ``answer`` turn for the selected profile on a thread."""
     payload = _validate_payload(payload)
     name = _resolve_profile_name(payload, server)
-    cfg = server.profiles.load(name)
+    cfg = config_override or server.profiles.load(name)
 
     with server.threads._lock:
+        if hasattr(server, "loops"):
+            active = server.loops.active(thread_id=thread_id, workspace_id=payload.get("continue_workspace_id"))
+            if active and (extra_metadata or {}).get("loop_id") != active["loop_id"]:
+                _reject("Stop the active loop before submitting another task for this workspace")
         thread = server.threads.get(thread_id)
         pending = server.jobs.get(thread.get("pending_job"))
         if pending is not None:
@@ -130,8 +135,17 @@ def submit_profile_turn(server, thread_id, payload):
             _reject("thread has reached the maximum message count")
 
         workflow = cfg.instructions_version
-        image, mime, explicit = _resolve_image(server, thread, payload, workflow)
+        if repair_context is not None or force_tests:
+            if cfg.provider != "ollama" or not workflow.startswith("coder-") or not cfg.tools:
+                _reject("Select a local coding profile to fix this review")
+            image, mime, explicit = None, None, False
+        else:
+            image, mime, explicit = _resolve_image(server, thread, payload, workflow)
         cfg = _resolve_config(server, cfg, payload, image)
+        if repair_context is not None or force_tests:
+            if cfg.provider != "ollama":
+                _reject("Review repairs require a local model")
+            cfg = cfg.model_copy(update={"project_tests": True})
         if "execution_mode" in payload:
             execution_mode = payload["execution_mode"]
             if not isinstance(execution_mode, str) or execution_mode not in {"ephemeral", "persistent"}:
@@ -152,6 +166,16 @@ def submit_profile_turn(server, thread_id, payload):
         if image:
             request["image"] = image
         request = validate_browser_request(request, cfg, server.allowed_roots)
+        if request.get("continue_workspace_id") and repair_context is None:
+            from local_agent.mobile.task_context import attach, capture
+
+            task_context = task_context or capture(server, thread_id, request["continue_workspace_id"])
+            if task_context is not None:
+                request = attach(request, task_context)
+        if repair_context is not None:
+            from local_agent.mobile.repair_controls import attach_repair_context
+
+            request = attach_repair_context(request, repair_context, cfg)
 
         if explicit and image is not None:
             server.threads.update_image(thread_id, image, mime)
@@ -161,6 +185,11 @@ def submit_profile_turn(server, thread_id, payload):
             if history
             else []
         )
+        if task_context is not None:
+            source_run_ids = list(dict.fromkeys([
+                *source_run_ids,
+                *(a["run_id"] for a in task_context.get("attempts", []) if a.get("run_id")),
+            ]))
 
         metadata = {
             "thread_id": thread_id,
@@ -178,8 +207,22 @@ def submit_profile_turn(server, thread_id, payload):
         }
         if request["mode"] == "coding":
             metadata["source_workspace"] = request["workspace"]
+            if request.get("continue_workspace_id"):
+                metadata["workspace_id"] = request["continue_workspace_id"]
         if cfg.tools:
             metadata["execution_mode"] = cfg.execution.execution_mode_default
+        if repair_context is not None:
+            metadata["repair_review_job_id"] = repair_context["review_job_id"]
+            metadata["repair_original_task"] = repair_context["evidence"]["original_task"]
+            metadata["question"] = "Fix the findings from this workspace review and rerun the tests."
+            metadata["source_run_ids"] = list(dict.fromkeys(
+                [*repair_context["source_run_ids"], *source_run_ids]
+            ))
+        if extra_metadata:
+            if set(extra_metadata) - {"loop_id", "loop_stage"}:
+                raise ValueError("Unknown controller job metadata")
+            metadata.update(extra_metadata)
+            metadata["question"] = "Local loop iteration: repair findings and rerun checks."
 
         job_id = server.jobs.submit(request, config=cfg, metadata=metadata)
         server.threads.update(thread_id, pending_job=job_id)

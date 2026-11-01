@@ -27,14 +27,15 @@ def pytest_addoption(parser):
 
 
 class Sandbox:
-    def __init__(self, root, source, image):
+    def __init__(self, root, source, image, *, settings=None):
         self.store = Store(root)
         self.workspaces = Workspaces(root)
         self.workspace_id, self.path = self.workspaces.create(source)
         self.run_id = new_id("run")
-        self.executor = DockerExecutor(self.store, self.workspaces, image)
+        self.executor = DockerExecutor(self.store, self.workspaces, image, settings=settings)
         config_ref = self.store.blobs.put_json(
-            {"policy": OFFLINE_POLICY, "policy_hash": OFFLINE_HASH}
+            {"policy": OFFLINE_POLICY, "policy_hash": OFFLINE_HASH,
+             "agent": {"execution": self.executor.settings.model_dump(mode="json")}}
         )
         self.store.create_run(
             RunManifest(
@@ -95,7 +96,7 @@ class Sandbox:
         _, proposed = self.store.record_response(
             self.run_id, response, (call,), causes=(requested.event_id,)
         )
-        normalized = normalize(name, arguments)
+        normalized = normalize(name, arguments, pids_limit=self.executor.settings.container_pids_limit)
         validated = self.store.record_validation(
             self.run_id, call.call_id, normalized, None, causes=(proposed[0].event_id,)
         )
@@ -110,6 +111,7 @@ class Sandbox:
             tool=name,
             tool_version=call.tool_version,
             arguments=normalized["arguments"],
+            effective_limits=normalized["effective_limits"],
             authorization_ref=decision.decision_id,
             normalized_request_hash=decision.normalized_request_hash,
             trace_id=ctx["trace_id"],

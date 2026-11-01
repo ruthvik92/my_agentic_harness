@@ -1,17 +1,29 @@
 # Git branches and worktrees for coding runs
 
-Select `coder.yaml` and enter the **root of a Git repository** in the browser's
+For the high-level workflow and a table of actions that create or reuse a
+worktree, see the [functional instruction manual](functional-manual.md#when-a-new-worktree-is-created).
+
+Select `coder.yaml` and enter the **project directory** in the browser's
 source-workspace field. CLI `local-agent run` uses the same behavior. The host
-creates a new branch named `agent/ws_<workspace-id>` and a linked Git worktree
+creates a new branch named `agent/<workspace-id>` (for example `agent/ws_…`) and a linked Git worktree
 from the current branch's committed `HEAD` by default, or a selected Git revision.
 It leaves your checkout on its existing
 branch and does not include staged, unstaged or untracked edits in the candidate.
 The result records the exact base commit and reports local differences.
 
-Non-Git directories, including a selected subdirectory without its own `.git`
-entry, retain the isolated-copy workflow. The existing calculator fixture is a
-subdirectory of this harness, so its earlier saved run remains a copied workspace.
-Select a Git repository root for new branch-backed runs.
+For a new coding project without its own `.git`, the harness automatically creates
+a `main` branch and initial commit before creating the managed worktree. Empty
+projects receive an empty commit; populated projects retain their existing file
+bytes as the baseline. `.gitignore` rules and the harness's import exclusions
+(such as `.venv` and caches) apply. Hooks, filters and user Git templates are not
+executed. Existing repositories and their uncommitted files retain the behavior
+described above. An existing repository needs a committed starting revision.
+
+A selected subdirectory without its own `.git` also becomes a separate repository.
+Select the enclosing repository root and use **Working subdirectory** when you
+want its history instead. Noncoding snapshots are unchanged. Previously created
+snapshot workspaces remain snapshots; start a new coding task from a source
+project containing their files to obtain a workspace that supports continuation.
 
 ## New tasks, continuation, and task directory
 
@@ -57,10 +69,14 @@ unknown workspaces, different source repositories, and externally moved branches
 must be resolved before continuing. Old copied workspaces cannot be continued
 with this Git workflow.
 
-Container persistence is separate: continuation retains workspace files, stops
-any previous keeper, and begins fresh processes. It does not promise to retain
-the previous task's `/tmp`, running services, or chat history. Use `resume` for
+Container persistence is separate from worktree identity. In persistent mode,
+continuation can reuse a compatible healthy keeper, retaining `/tmp` and background
+processes while consistent snapshots pause and unpause it. Expiry, incompatible
+settings or an unhealthy keeper cause replacement; switching to ephemeral mode
+stops the old keeper. Workspace files survive these changes. A new run does not
+automatically give the model the full earlier conversation. Use `resume` for
 recovery of an interrupted run; **Continue task** starts a new task instead.
+See [executor lifecycle](executor.md) for the exact reuse rules.
 
 ## What appears in the browser
 
@@ -105,7 +121,14 @@ git -C /path/to/source-repository show agent/ws_<id>
 git -C /path/to/source-repository diff BASE_COMMIT CANDIDATE_COMMIT
 ```
 
-After reviewing and testing, merge in the intended clean checkout. For a source
+The browser can run an explicit **Review workspace and run checks (paid)** on a
+published result. It inspects an exported commit in a separate sandbox and saves
+execution evidence and a structured verdict. After approval, a separate
+**Merge reviewed commit** action confirms the exact commit and fast-forwards a
+clean, unchanged source branch. See [workspace review](browser.md#workspace-review-and-merge).
+There is no automatic merge after review.
+
+For manual integration after reviewing and testing, merge in the intended clean checkout. For a source
 branch that has not advanced since the run started:
 
 ```bash
@@ -148,7 +171,8 @@ configuration, source revision, workspace events, final result, and the private
 
 ## Initial limitations
 
-- The repository must have a committed `HEAD` and ordinary tracked files.
+- An existing repository must have a committed `HEAD` and ordinary tracked files;
+  a source directory without a repository is initialized as described above.
   Tracked symlinks, submodules and committed cache/development directories are
   rejected before checkout. This keeps the existing symlink/special-file boundary.
 - Git checkout filters are intentionally bypassed. Git LFS objects and submodule

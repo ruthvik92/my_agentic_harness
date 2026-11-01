@@ -1,13 +1,17 @@
 # Documentation
 
-Start with [the TLDR](tldr.md) or [the user guide](guide.md).
+Start with the [functional instruction manual](functional-manual.md) for the
+end-to-end user workflow, or [the TLDR](tldr.md) for command-line setup.
+The [detailed implementation guide](guide.md) explains the internals.
 
 | Topic | Guide |
 |---|---|
+| End-to-end operation, worktree lifetimes, version choice and previews | [Functional instruction manual](functional-manual.md) |
 | Browser access, pairing and task selection | [Browser interface](browser.md) |
 | Three active profiles and optional examples | [Configuration](configs.md) |
 | Agent branches, worktrees and reviewing changes | [Git workspaces](git-workspaces.md) |
 | PDF schematic investigation | [Circuits](circuits.md) |
+| Interactive browser tests and capability recovery | [Browser verification](browser-verification.md) |
 | Docker, persistent sessions and isolation | [Executor lifecycle](executor.md) |
 | Executor source modules | [Executor developer guide](executor/README.md) |
 | Evidence, timelines and replay | [Traces](traces.md) |

@@ -66,6 +66,7 @@ class ExecutionSettings(Record):
     max_persistent_containers: int = Field(default=4, ge=1, le=64)
     container_memory_limit: int = Field(default=4096, ge=64, le=4096)
     container_cpu_limit: int = Field(default=4, ge=1, le=4)
+    container_pids_limit: int = Field(default=128, ge=64, le=1024)
     container_network_enabled: bool = False
 
     @field_validator("container_network_enabled", mode="before")
@@ -74,6 +75,26 @@ class ExecutionSettings(Record):
         if type(value) is not bool:
             raise ValueError("container_network_enabled must be a boolean")
         return value
+
+
+class EnvironmentSettings(Record):
+    """Host provisioning grants; ordinary execution remains offline."""
+
+    allow_network: bool = False
+    timeout_seconds: int = Field(default=600, ge=1, le=1800)
+    max_preparations: int = Field(default=4, ge=1, le=20)
+
+
+class RepairProgressSettings(Record):
+    """Operator policy for reviewed local repairs, never model tool arguments."""
+
+    mode: Literal["off", "observe", "enforce"] = "enforce"
+    inspection_allowance: int = Field(default=16, ge=4, le=200)
+    probe_allowance: int = Field(default=4, ge=2, le=50)
+    recovery_allowance: int = Field(default=8, ge=2, le=100)
+    max_recoveries: int = Field(default=2, ge=1, le=3)
+    measurement_file_limit: int = Field(default=20000, ge=100, le=100000)
+    measurement_byte_limit: int = Field(default=268435456, ge=1048576, le=268435456)
 
 
 class AgentConfig(Record):
@@ -87,9 +108,13 @@ class AgentConfig(Record):
     completion_token_field: Literal["max_completion_tokens", "max_tokens"] = "max_completion_tokens"
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
     tools: tuple[Name, ...] = ("read_file", "run_command")
+    project_tests: bool = False
+    paid_token_limit: int | None = Field(default=None, ge=1, le=10000000)
     policy_profile: Name = "dev-offline-v1"
     limits: Limits = Field(default_factory=Limits)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
+    environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
+    repair_progress: RepairProgressSettings = Field(default_factory=RepairProgressSettings)
     window_tokens: int = Field(default=8192, ge=2048, le=131072)
     output_reserve_tokens: int = Field(default=2048, ge=256, le=32768)
 
@@ -179,7 +204,7 @@ class PolicyDecision(Record):
 class EffectiveLimits(Record):
     memory_mb: int = Field(default=4096, ge=1, le=4096)
     cpu_cores: int = Field(default=4, ge=1, le=4)
-    pids: int = Field(default=128, ge=1, le=128)
+    pids: int = Field(default=128, ge=1, le=1024)
     network: Literal[False] = False
     gpu: Literal[False] = False
 
@@ -209,7 +234,7 @@ class ExecutionRequest(Record):
 
 class ExecutionResult(Record):
     execution_id: ID
-    status: Literal["succeeded", "failed", "timeout", "cancelled", "output_limit"]
+    status: Literal["succeeded", "failed", "timeout", "cancelled", "output_limit", "process_limit"]
     exit_code: int | None
     output_ref: BlobRef
     preview: str = Field(max_length=16384)
@@ -232,6 +257,7 @@ class ExecutionResult(Record):
     completed_at: str | None = None
     duration_ms: float | None = Field(default=None, ge=0)
     error: str | None = Field(default=None, max_length=4096)
+    resource_usage: dict[str, JsonValue] | None = None
 
 
 class DecisionRecord(Record):
@@ -290,6 +316,50 @@ def validate_path(value: str | None) -> str | None:
     if parts[0] not in {"project", "memory", "tools", "scratch", "outputs"}:
         raise ValueError("path must start with an approved workspace directory")
     return value
+
+
+class EnvironmentInventoryArgs(Record):
+    pass
+
+
+class PrepareEnvironmentArgs(Record):
+    reason: str = Field(min_length=1, max_length=1000)
+    runtimes: tuple[Literal["python", "node"], ...] = Field(default=(), max_length=2)
+    capabilities: tuple[Literal["headless_browser", "browser_interaction"], ...] = Field(default=(), max_length=2)
+    dependency_manifests: tuple[PathText, ...] = Field(default=(), max_length=12)
+    system_packages: tuple[str, ...] = Field(default=(), max_length=32)
+    python_packages: tuple[str, ...] = Field(default=(), max_length=32)
+
+    @field_validator("dependency_manifests")
+    @classmethod
+    def project_manifests(cls, value):
+        for path in value:
+            validate_path(path)
+            if not path.startswith("project/") or path.rsplit("/", 1)[-1] not in {
+                "pyproject.toml", "uv.lock", "package.json", "package-lock.json"
+            }:
+                raise ValueError("Use project-relative Python or npm dependency manifests")
+            if ".git" in path.split("/"):
+                raise ValueError("Git metadata is not a dependency manifest")
+        return value
+
+    @field_validator("system_packages")
+    @classmethod
+    def registry_system_packages(cls, value):
+        import re
+
+        if any(not re.fullmatch(r"[a-z0-9][a-z0-9+.-]{0,80}(?:=[A-Za-z0-9.+:~_-]{1,80})?", p) for p in value):
+            raise ValueError("Use Debian package names/versions, never commands, URLs or options")
+        return value
+
+    @field_validator("python_packages")
+    @classmethod
+    def registry_python_packages(cls, value):
+        import re
+
+        if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}(?:\[[A-Za-z0-9_,.-]+\])?(?:[<>=!~]{1,2}[A-Za-z0-9.*+_-]+(?:,[<>=!~]{1,2}[A-Za-z0-9.*+_-]+)*)?", p) for p in value):
+            raise ValueError("Use Python registry requirements, never URLs, paths or options")
+        return value
 
 
 class ReadFileV1Args(Record):

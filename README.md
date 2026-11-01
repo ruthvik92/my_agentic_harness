@@ -2,9 +2,13 @@
 
 A local harness for browser chat, coding tasks, and analog schematic investigation.
 The original design is preserved in [the historical build guide](docs/history/local-agent-build-guide.md).
-Native Ollama or an OpenAI-compatible Chat Completions API performs inference. All generated commands, edits and helpers
+Native Ollama or OpenAI-compatible Chat Completions/Responses APIs perform inference. All generated commands, edits and helpers
 run in non-root, offline Docker containers. SQLite and immutable blobs retain
 inputs, decisions, execution outcomes and restart evidence.
+
+Start with the **[functional instruction manual](docs/functional-manual.md)** for
+the end-to-end browser workflow: new tasks versus continuation, workspace and
+commit identity, previews, local repairs, paid review, and merging.
 
 | Workflow | Active profile | Guide |
 |---|---|---|
@@ -31,7 +35,8 @@ CPU/memory/swap/PID limits; the CLI does not weaken these requirements.
 
 For a Git repository root, coding runs create an `agent/ws_<id>` branch and linked
 host worktree from committed `HEAD`. Pending edits in your existing checkout are
-preserved and excluded. Other directories use a copied project. Docker tools edit
+preserved and excluded. Coding directories without a repository are initialized
+before creating a managed worktree; noncoding workflows use copied projects. Docker tools edit
 the candidate; its final diff is recorded against a protected baseline and the
 host publishes a candidate commit. Your source checkout is not switched or merged.
 See [Git workspaces](docs/git-workspaces.md) for browser cards and review commands.
@@ -74,6 +79,9 @@ SQLite. Recorded replay consumes saved provider/tool responses and state
 transitions, without live inference or tools. `resume` continues a nonterminal
 live run after reconciliation. An uncertain mutation stops in
 `needs_reconciliation` and is never silently repeated.
+
+See [Finding runtime data](docs/runtime-data.md) for the chat/job/run/workspace
+mapping, Docker reuse limits, and the purpose of other `local-agent-*` folders.
 
 State defaults to `~/.local/share/local-agent` on a local filesystem. Supply
 `--data-root /path/to/private-state` **before** the command to change it. Working
@@ -125,6 +133,15 @@ and the [config guide](docs/configs.md) for setup and profile details. Saved
 image memory, chat history, review and feedback traces remain available.
 Browser authentication uses terminal pairing, not OAuth; paired devices share
 one local owner profile.
+
+The shipped coding profile now runs automatic controller tests with reproducible
+Python project setup. Workspace reviewers share the same Auto test plan, and the
+browser shows live measured token totals. See [project testing](docs/project-tests.md).
+
+Coding models can inspect their environment and request missing runtimes,
+packages, and headless browser tooling. Preparation is recorded separately;
+coding, tests, and workspace review use the selected offline Docker image.
+See [model-requested environments](docs/environment-preparation.md).
 
 Docker execution defaults to ephemeral containers. Tool-enabled profiles can opt into
 workspace-owned persistent sessions with a 30-minute idle timeout; see

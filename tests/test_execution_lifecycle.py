@@ -39,9 +39,16 @@ class FakeDocker:
             labels = dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a == "--label")
             self.containers[cid] = {
                 "Id": cid, "Image": IMAGE, "Config": {"Labels": labels},
+                "Name": "/" + args[args.index("--name") + 1],
                 "State": {"Running": False, "Status": "created"},
             }
             return cid.encode()
+        if op == "rename":
+            self.containers[args[1]]["Name"] = "/" + args[2]
+            return b""
+        if op in {"pause", "unpause"}:
+            self.containers[args[1]]["State"]["Paused"] = op == "pause"
+            return b""
         cid = args[-1]
         if op == "start":
             self.containers[cid]["State"] = {"Running": True, "Status": "running"}
@@ -93,9 +100,13 @@ def test_reuse_isolation_capacity_and_restart(setup):
         manager = create()
         async with manager.session(WS, "run1", "exec1", []):
             first = manager.load(WS)["container_id"]
+        assert WS in docker.containers[first]["Name"]
+        docker.containers[first]["Name"] = "/local-agent-session-legacy"
         async with create().session(WS, "run2", "exec2", []) as reused:
             assert reused["container_id"] == first
             assert reused["run_id"] == "run2"
+            assert reused["container_name"] == manager.container_name(WS)
+            assert docker.containers[first]["Name"] == "/" + manager.container_name(WS)
         async with manager.session(WS2, "run3", "exec3", []) as second:
             assert second["container_id"] != first
         assert len(docker.containers) == 2
@@ -104,6 +115,30 @@ def test_reuse_isolation_capacity_and_restart(setup):
         with pytest.raises(RuntimeError, match="capacity"):
             async with manager.session(WS2, "run4", "exec4", []):
                 pass
+    asyncio.run(scenario())
+
+
+def test_snapshot_freezes_recovers_and_reuses_keeper(setup):
+    create, docker, _ = setup
+
+    async def scenario():
+        manager = create()
+        async with manager.session(WS, "run1", "exec1", []) as record:
+            cid = record["container_id"]
+        async with manager.snapshot(WS):
+            assert docker.containers[cid]["State"]["Paused"]
+        assert not docker.containers[cid]["State"]["Paused"]
+        record = manager.load(WS)
+        record["snapshot_paused"] = True
+        manager.save(record)
+        docker.containers[cid]["State"]["Paused"] = True
+        async with create().session(WS, "run2", "exec2", []) as reused:
+            assert reused["container_id"] == cid
+            assert not docker.containers[cid]["State"]["Paused"]
+        with pytest.raises(RuntimeError, match="injected"):
+            async with manager.snapshot(WS):
+                raise RuntimeError("injected snapshot failure")
+        assert not docker.containers[cid]["State"]["Paused"]
     asyncio.run(scenario())
 
 

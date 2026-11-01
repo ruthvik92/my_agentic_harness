@@ -330,10 +330,10 @@ def validate_execution_options(value):
     Never echoes environment values in error messages.
     """
     if value is None:
-        return {"memory_mb": 4096, "cpu_cores": 4, "environment": {}}
+        return {"memory_mb": 4096, "cpu_cores": 4, "pids_limit": 128, "environment": {}}
     if not isinstance(value, dict):
         raise ValueError("invalid _execution: must be an object")
-    allowed = {"memory_mb", "cpu_cores", "environment"}
+    allowed = {"memory_mb", "cpu_cores", "pids_limit", "environment"}
     unknown = set(value) - allowed
     if unknown:
         raise ValueError("invalid _execution: unknown options")
@@ -341,6 +341,7 @@ def validate_execution_options(value):
         value.get("memory_mb", 4096), "memory_mb", 64, 4096
     )
     cpu_cores = _strict_int(value.get("cpu_cores", 4), "cpu_cores", 1, 4)
+    pids_limit = _strict_int(value.get("pids_limit", 128), "pids_limit", 64, 1024)
     env = value.get("environment", {})
     if not isinstance(env, dict):
         raise ValueError("invalid environment: must be an object")
@@ -361,13 +362,13 @@ def validate_execution_options(value):
         if len(val) > MAX_ENV_VALUE_LEN:
             raise ValueError("invalid environment value: too long")
         normalized[key] = val
-    return {"memory_mb": memory_mb, "cpu_cores": cpu_cores, "environment": normalized}
+    return {"memory_mb": memory_mb, "cpu_cores": cpu_cores, "pids_limit": pids_limit, "environment": normalized}
 
 
 def main():
     request = json.loads(sys.stdin.buffer.read(2 * MAX_FILE))
     options = validate_execution_options(request.get("_execution"))
-    attest_limits(memory_mb=options["memory_mb"], cpu_cores=options["cpu_cores"])
+    attest_limits(memory_mb=options["memory_mb"], cpu_cores=options["cpu_cores"], pids_limit=options["pids_limit"])
     result = operate(request["tool"], request["arguments"], environment=options["environment"])
     if isinstance(result, int):
         return result
@@ -375,7 +376,7 @@ def main():
     return 0
 
 
-def attest_limits(memory_mb=4096, cpu_cores=4):
+def attest_limits(memory_mb=4096, cpu_cores=4, pids_limit=128):
     with open("/proc/self/status") as stream:
         status = dict(line.split(":", 1) for line in stream if ":" in line)
     checks = {
@@ -387,7 +388,7 @@ def attest_limits(memory_mb=4096, cpu_cores=4):
     expected = {
         "memory.max": str(memory_mb * 1024 * 1024),
         "memory.swap.max": "0",
-        "pids.max": "128",
+        "pids.max": str(pids_limit),
     }
     for name, value in expected.items():
         with open("/sys/fs/cgroup/" + name) as stream:

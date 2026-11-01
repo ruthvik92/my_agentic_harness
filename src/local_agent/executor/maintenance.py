@@ -27,7 +27,10 @@ def cleanup_attestor(store, workspaces):
         host = info["HostConfig"]
         memory = host["Memory"] // (1024 * 1024)
         cpu = host["NanoCpus"] // 1000000000
-        settings = ExecutionSettings(container_memory_limit=memory, container_cpu_limit=cpu)
+        settings = ExecutionSettings(
+            container_memory_limit=memory, container_cpu_limit=cpu,
+            container_pids_limit=host["PidsLimit"],
+        )
         # Exact matching below rejects fractional limits and all unsafe host settings.
         return DockerExecutor(store, workspaces, info["Image"], settings=settings).attest(
             info, workspace

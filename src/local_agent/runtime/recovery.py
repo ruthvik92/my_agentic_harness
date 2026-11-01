@@ -25,12 +25,17 @@ async def reconcile(agent, row):
         if result.execution_id != execution.execution_id:
             raise NeedsReconciliation("recovered result identity mismatch")
         outcome = "published_result"
+    elif execution.tool in {"environment_inventory", "prepare_environment"}:
+        # Build/download side effects cannot be inferred from Docker logs or replayed.
+        raise NeedsReconciliation("Environment preparation was interrupted without a published result; inspect its recorded commands before retrying")
     else:
         mapping = agent.executor.mapping(execution.execution_id)
         if mapping:
             expected = {
-                "execution_id": execution.execution_id, "workspace_id": execution.workspace_id,
-                "run_id": agent.run_id, "tool_call_id": execution.call_id,
+                "execution_id": execution.execution_id,
+                "workspace_id": execution.workspace_id,
+                "run_id": agent.run_id,
+                "tool_call_id": execution.call_id,
             }
             if any(mapping.get(key) != value for key, value in expected.items()):
                 raise NeedsReconciliation("execution container mapping identity mismatch")
@@ -42,11 +47,15 @@ async def reconcile(agent, row):
             if mapping["execution_mode"] == "persistent":
                 # The keeper's logs/exit status cannot prove an exec command's outcome.
                 await manager.stop(
-                    execution.workspace_id, expected_container_id=mapping["container_id"],
+                    execution.workspace_id,
+                    expected_container_id=mapping["container_id"],
                     expected_execution_id=execution.execution_id,
                 )
                 agent.last = store.reconcile_execution(
-                    agent.run_id, execution.execution_id, None, "unknown",
+                    agent.run_id,
+                    execution.execution_id,
+                    None,
+                    "unknown",
                     causes=(agent.last.event_id,),
                 )
                 raise NeedsReconciliation(
@@ -67,7 +76,8 @@ async def reconcile(agent, row):
                 "local-agent.run": agent.run_id,
             }
             if any(labels.get(key) != value for key, value in required.items()) or (
-                mapping and (
+                mapping
+                and (
                     info["Id"] != mapping["container_id"]
                     or labels.get("local-agent.owner") != mapping["owner"]
                 )
@@ -115,7 +125,8 @@ async def reconcile(agent, row):
         raise NeedsReconciliation(
             f"container/result missing for {execution.execution_id}; mutation will not be replayed"
         )
-    await agent.executor.release(execution.execution_id)
+    if execution.tool not in {"environment_inventory", "prepare_environment"}:
+        await agent.executor.release(execution.execution_id)
     return result
 
 
@@ -147,7 +158,7 @@ async def restore(agent, run_id):
     agent.store.blobs.budget_refs.update(existing)
     if agent.store.blobs.budget < 0:
         raise OSError("persisted evidence exceeds the run budget")
-    from local_agent.policy.engine import OFFLINE_HASH
+    from local_agent.policy.engine import LEGACY_OFFLINE_HASH, OFFLINE_HASH
     from local_agent.storage.blobs import digest
 
     if digest(store.blobs.read(manifest["config_ref"])) != manifest["config_hash"]:
@@ -168,8 +179,11 @@ async def restore(agent, run_id):
     resolved_agent = AgentConfig.model_validate_json(canonical(config["agent"]))
     if resolved_agent != agent.config:
         raise NeedsReconciliation("agent configuration changed; no automatic dispatch")
-    if config["policy_hash"] != OFFLINE_HASH:
+    if config["policy_hash"] not in {OFFLINE_HASH, LEGACY_OFFLINE_HASH}:
         raise NeedsReconciliation("effective policy changed; no automatic dispatch")
+    if config["policy_hash"] == LEGACY_OFFLINE_HASH and agent.config.execution.container_pids_limit != 128:
+        raise NeedsReconciliation("legacy policy requires the original 128-task limit")
+    agent.policy_hash = config["policy_hash"]
     agent.run_id = run_id
     agent.workspace_id = manifest["workspace_id"]
     agent.path = agent.workspaces.path(agent.workspace_id)
@@ -181,6 +195,19 @@ async def restore(agent, run_id):
     agent.baseline = store.control / "baselines" / config.get("baseline_id", agent.workspace_id)
     agent.workspace_options = config.get("workspace_options", {})
     agent.working_directory = config.get("working_directory", ".")
+    agent.test_plan = config.get("project_test_plan")
+    agent.base_sandbox = config.get("base_sandbox", config["sandbox"])
+    from local_agent.environments.service import selected
+
+    active_sandbox = selected(store, run_id)
+    if active_sandbox.get("prepared_environment"):
+        from local_agent.executor.docker import DockerExecutor
+
+        agent.sandbox = active_sandbox
+        agent.executor = DockerExecutor(store, agent.workspaces, active_sandbox["image"], settings=agent.config.execution)
+        agent.executor.fault_hook = agent.fault
+        agent.environment_inventory = active_sandbox["prepared_environment"].get("inventory")
+    agent.test_retries = sum(e.event_type == "project.tests" for e in store.events(run_id))
     agent.created = True
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(run["created_utc"])).total_seconds()
     import time
@@ -270,10 +297,17 @@ async def restore(agent, run_id):
                         store.blobs.read(attempt["request_ref"])
                     )
                     capture_image(agent, execution, result)
-                    await agent.executor.release(attempt["id"])
+                    if execution.tool not in {"environment_inventory", "prepare_environment"}:
+                        await agent.executor.release(attempt["id"])
                 else:
                     result = await reconcile(agent, attempt)
                 content = result_preview(store, result, call.name)
+            elif any(e.event_type == "tool.skipped" and e.data.get("preview_ref")
+                     and call.call_id in e.data.get("skipped_call_ids", []) for e in prior):
+                skipped = next(e for e in reversed(prior) if e.event_type == "tool.skipped"
+                               and e.data.get("preview_ref")
+                               and call.call_id in e.data.get("skipped_call_ids", []))
+                content = store.blobs.json(skipped.data["preview_ref"])
             elif call_row["rejected"]:
                 rejected = next(
                     e
@@ -316,9 +350,7 @@ async def restore(agent, run_id):
                 group.append(tool_message(call, content))
         if external:
             group.extend(
-                image_messages(
-                    store, agent.run_id, image_execution_ids, agent.config.provider
-                )
+                image_messages(store, agent.run_id, image_execution_ids, agent.config.provider)
             )
             agent.groups.append(group)
             agent.restored_completion = None

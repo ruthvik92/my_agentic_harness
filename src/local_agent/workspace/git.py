@@ -71,6 +71,39 @@ def command(record, *args, input=None, index=None, tree=None):
     )
 
 
+def initialize_project(source):
+    """Publish a literal baseline without executing source hooks or filters."""
+    from local_agent.workspace.manager import IMPORT_EXCLUDES, copy_tree
+
+    # Validate and build beside the source before publishing any Git metadata.
+    # Only .git moves into the source; its working files remain untouched.
+    with tempfile.TemporaryDirectory(prefix=".local-agent-init-", dir=source.parent) as temporary:
+        snapshot = Path(temporary) / "project"
+        copy_tree(source, snapshot, exclude=IMPORT_EXCLUDES)
+        git("-C", snapshot, "init", "--template=", "-b", "main")
+        names = git("-C", snapshot, "ls-files", "--others", "--exclude-standard", "-z")
+        names = list(filter(None, names.split(b"\0")))
+        if len(names) > MAX_FILES:
+            raise ValueError("Git project has too many files")
+        updates, total = [], 0
+        for name in sorted(names):
+            relative = Path(os.fsdecode(name))
+            if relative.is_absolute() or any(part in {"..", ".git"} for part in relative.parts):
+                raise ValueError("Invalid project Git path")
+            data, info = read_literal(snapshot, relative, MAX_BYTES - total)
+            total += len(data)
+            oid = git("-C", snapshot, "hash-object", "-w", "--no-filters", "--stdin", input=data).strip()
+            mode = b"100755" if info.st_mode & 0o111 else b"100644"
+            updates.append(mode + b" " + oid + b"\t" + name + b"\0")
+        git("-C", snapshot, "read-tree", "--empty")
+        git("-C", snapshot, "update-index", "-z", "--index-info", input=b"".join(updates))
+        tree = git("-C", snapshot, "write-tree").decode().strip()
+        commit = git("-C", snapshot, "commit-tree", tree,
+                     input=b"Initialize project for local-agent\n").decode().strip()
+        git("-C", snapshot, "update-ref", "refs/heads/main", commit)
+        (snapshot / ".git").rename(source / ".git")
+
+
 class GitWorktrees:
     def __init__(self, workspaces):
         self.workspaces = workspaces
@@ -255,6 +288,10 @@ class GitWorktrees:
                 raise ValueError("Git candidate has too many files")
             for name in sorted(set(filter(None, names))):
                 relative = Path(name.decode("utf-8"))
+                from local_agent.workspace.manager import IMPORT_EXCLUDES
+
+                if any(part in IMPORT_EXCLUDES for part in relative.parts):
+                    continue
                 if relative.is_absolute() or any(p in {"..", ".git"} for p in relative.parts):
                     raise ValueError("Invalid candidate Git path")
                 path = snapshot / relative

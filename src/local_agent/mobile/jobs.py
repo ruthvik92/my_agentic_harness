@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import secrets
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,7 @@ class Jobs:
             self.pending = queue.Queue(maxsize=3)
             self.lock = threading.Lock()
             self.stopping = False
+            self.callback_job = None
             self.runner = runner or self.execute
             self.worker = threading.Thread(target=self.work, name="browser-jobs", daemon=False)
             self.worker.start()
@@ -66,6 +68,12 @@ class Jobs:
     def get(self, job_id):
         if not isinstance(job_id, str) or not JOB_ID.fullmatch(job_id):
             return None
+        # Scheduling callbacks may inspect their just-completed source job. Other
+        # HTTP threads must still see "running" until chat persistence finishes.
+        if threading.current_thread() is getattr(self, "worker", None):
+            current = getattr(self, "callback_job", None)
+            if current is not None and current["job_id"] == job_id:
+                return dict(current)
         try:
             return json.loads(read_evidence(self.directory, job_id + "/status.json", 1024 * 1024))
         except FileNotFoundError:
@@ -126,11 +134,17 @@ class Jobs:
         if command == "browser-run":
             for root in self.allowed_roots:
                 argv.extend(["--allow-root", str(root)])
+        if request.get("mode") == "workspace-review":
+            argv = [sys.executable, "-m", "local_agent.mobile.workspace_review",
+                    "--data-root", str(self.root), "--agent", str(chosen_path),
+                    "--request", str(request_path)]
+            for root in self.allowed_roots:
+                argv.extend(["--allow-root", str(root)])
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            timeout=chosen.limits.run_timeout_seconds + 120,
+            timeout=chosen.limits.run_timeout_seconds * (2 if request.get("mode") == "workspace-review" else 1) + 120,
             check=False,
         )
         try:
@@ -176,6 +190,9 @@ class Jobs:
                         "git_workspace",
                         "working_directory",
                         "task_mode",
+                        "workspace_review",
+                        "project_tests",
+                        "repair_progress",
                     ):
                         if field in result:
                             job[field] = result[field]
@@ -194,11 +211,29 @@ class Jobs:
                         )
                 except Exception as exc:
                     job.update(status="failed", error=str(exc))
+                    # A killed/timed-out controller may have created a trace before
+                    # it could return JSON. Retain that correlation for diagnostics.
+                    try:
+                        from local_agent.storage.database import Store
+
+                        progress = json.loads(read_evidence(self.directory, job_id + "/progress.json", 4096))
+                        store = Store(self.root, readonly=True)
+                        try:
+                            run = store.run(progress["run_id"])
+                            manifest = store.blobs.json(run["manifest_ref"])
+                            job.update(run_id=run["id"], workspace_id=manifest["workspace_id"])
+                        finally:
+                            store.close()
+                    except (OSError, ValueError, KeyError, sqlite3.Error):
+                        pass
                 if self.on_result:
+                    self.callback_job = job
                     try:
                         self.on_result(job)
                     except Exception as exc:
                         job.update(status="failed", error="Thread persistence failed: " + str(exc))
+                    finally:
+                        self.callback_job = None
                 publish(self.directory / job_id / "status.json", job)
             finally:
                 self.pending.task_done()

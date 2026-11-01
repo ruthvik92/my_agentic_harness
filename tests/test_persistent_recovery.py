@@ -1,4 +1,6 @@
 import asyncio
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +20,8 @@ from local_agent.storage.database import Store
 @pytest.mark.parametrize("point", [
     "after_container_launch", "after_result_publication", "after_result_commit",
 ])
-def test_persistent_controller_crash_never_replays_mutation(tmp_path, request, point):
+@pytest.mark.parametrize("exhaust_pids", [False, True])
+def test_persistent_controller_crash_never_replays_mutation(tmp_path, request, point, exhaust_pids):
     image = request.config.getoption("--docker-image")
     if image is None:
         pytest.skip("requires --docker-image")
@@ -27,6 +30,7 @@ def test_persistent_controller_crash_never_replays_mutation(tmp_path, request, p
         [sys.executable, str(Path(__file__).with_name("crash_driver.py")),
          str(root), point, image, "persistent"],
         timeout=60, check=False,
+        env={**os.environ, "LOCAL_AGENT_TEST_EXHAUST_PIDS": "1" if exhaust_pids else "0"},
     )
     assert child.returncode == 86
     store = Store(root)
@@ -39,7 +43,7 @@ def test_persistent_controller_crash_never_replays_mutation(tmp_path, request, p
         provider = ScriptedProvider(responses=(
             {"text": "Done", "tool_calls": [], "finish_status": "stop"},
         ))
-        config = load_config(Path("config/coder.yaml")).model_copy(update={
+        config = load_config(Path("config/coder.yaml")).model_copy(update={"project_tests":False}).model_copy(update={
             "execution": ExecutionSettings(execution_mode_default="persistent"),
         })
         agent = Agent(store, config, {**sandbox_config(), "image": image}, provider=provider)
@@ -54,11 +58,20 @@ def test_persistent_controller_crash_never_replays_mutation(tmp_path, request, p
             assert count.read_text() == "X"
             report = audit(store, run_id)
             assert report["ok"], report["errors"]
+            if exhaust_pids:
+                results = [store.blobs.json(e.data["result_ref"]) for e in store.events(run_id)
+                           if e.event_type in {"execution.finished", "execution.reconciled"}
+                           and e.data.get("result_ref")]
+                assert any(r["status"] == "process_limit" for r in results)
+                record = json.loads((root / "control/containers" / (manifest["workspace_id"] + ".json")).read_text())
+                assert record["state"] == "REMOVED"
     finally:
         try:
-            if "manifest" in locals():
-                asyncio.run(sweep(
-                    root, image, ExecutionSettings(), workspace_id=manifest["workspace_id"]
-                ))
+            for path in (root / "control/containers").glob("ws_*.json"):
+                record = json.loads(path.read_text())
+                if record["state"] != "REMOVED":
+                    asyncio.run(sweep(
+                        root, record["image"], ExecutionSettings(), workspace_id=record["workspace_id"]
+                    ))
         finally:
             store.close()

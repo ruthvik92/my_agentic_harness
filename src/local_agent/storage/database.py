@@ -104,9 +104,20 @@ class Store:
         else:
             if path.is_symlink():
                 raise ValueError("database may not be a symlink")
-            fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-            os.fchmod(fd, 0o600)
-            os.close(fd)
+            # Closing any raw fd for a SQLite database releases this process's
+            # POSIX locks, even if another sqlite3 connection still owns them.
+            # Only open a raw fd when creating a previously absent database.
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                import stat
+
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    raise ValueError("database must be a regular file") from None
+                os.chmod(path, 0o600, follow_symlinks=False)
+            else:
+                os.fchmod(fd, 0o600)
+                os.close(fd)
             self.db = sqlite3.connect(path, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -378,6 +389,7 @@ class Store:
                 arguments,
                 version=call.tool_version,
                 legacy_evidence="evidence_ref" in normalized["arguments"],
+                pids_limit=config.get("agent", {}).get("execution", {}).get("container_pids_limit", 128),
             ):
                 raise ValueError("validated arguments differ from the original proposal")
             manifest = self.blobs.json(self.run(run_id)["manifest_ref"])

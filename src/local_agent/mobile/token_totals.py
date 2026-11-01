@@ -12,10 +12,14 @@ def totals(rows):
             "measured_openai_output",
             "measured_openai_total",
             "measured_openai_cached",
+            "measured_openai_reasoning",
+            "unknown_openai_reasoning",
             "measured_local_input",
             "measured_local_output",
             "measured_local_total",
             "measured_review_tokens",
+            "measured_review_input",
+            "measured_review_output",
             "local_requests",
             "openai_requests",
             "unknown_openai_requests",
@@ -38,13 +42,20 @@ def totals(rows):
         if valid(inp) and valid(out):
             result[prefix + "_total"] += inp + out
             if route == "openai":
-                if row.get("kind") == "review":
+                if row.get("kind") in {"review", "workspace_review"}:
                     result["measured_review_tokens"] += inp + out
+                    result["measured_review_input"] += inp
+                    result["measured_review_output"] += out
                 else:
                     paid_nonreview += inp + out
         else:
             result["unknown_openai_requests" if route == "openai" else "unknown_local_usage"] += 1
         if route == "openai":
+            reasoning = row.get("reasoning_tokens")
+            if valid(reasoning):
+                result["measured_openai_reasoning"] += reasoning
+            else:
+                result["unknown_openai_reasoning"] += 1
             cached = row.get("cached_tokens")
             if valid(cached):
                 result["measured_openai_cached"] += cached

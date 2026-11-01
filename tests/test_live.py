@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 import httpx
@@ -157,7 +158,10 @@ def test_live_scripted_repair_has_real_independent_verification(tmp_path, reques
             b'{"name":"read_file","arguments":{"path":"project/a"}}}]} }',
             200,
         ),
+        (b'{"done":true,"done_reason":"length","eval_count":8192,"message":{"role":"assistant","content":"partial without parsed calls"}}', 200),
         (b'{"error":"unavailable"}', 503),
+        (b'{"error":"invalid tool call arguments: unexpected end of JSON input"}', 500),
+        (b'{"error":"out of memory"}', 500),
     ],
 )
 def test_failed_provider_responses_keep_raw_evidence(tmp_path, body, status):
@@ -184,7 +188,11 @@ def test_failed_provider_responses_keep_raw_evidence(tmp_path, body, status):
     with pytest.raises(ProviderResponseError) as error:
         asyncio.run(provider.generate(request))
     assert store.blobs.read(error.value.raw_ref) == body
+    if status != 200:
+        assert json.loads(body)["error"] in str(error.value)
+        assert error.value.recoverable_tool_error is (status == 500 and b"invalid tool call arguments" in body)
     if b'"done_reason":"length"' in body:
         assert "output token limit reached (eval_count=8192)" in str(error.value)
+        assert error.value.recoverable_tool_error is True
     asyncio.run(provider.close())
     store.close()

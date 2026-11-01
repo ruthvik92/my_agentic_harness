@@ -130,6 +130,9 @@ def run_rows(store, run_id, kind, baseline):
             "model": config.get("model"),
             "input_tokens": count_value(inp),
             "output_tokens": count_value(out),
+            "reasoning_tokens": count_value(
+                (usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+            ),
             "cached_tokens": count_value(
                 (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
             ),
@@ -165,6 +168,9 @@ def job_usage(root, job, baseline=DEFAULT_BASELINE):
         return {"rule": RULE, "baseline_model": baseline, "rows": [], "totals": totals([])}
     store = Store(root, readonly=True)
     try:
+        if not store.db.execute("SELECT 1 FROM runs WHERE id=?", (job["run_id"],)).fetchone():
+            return {"rule": RULE, "baseline_model": baseline, "rows": [], "totals": totals([]),
+                    "unavailable": True, "reason": "Run record is missing", "source_run_id": job["run_id"]}
         rows = run_rows(store, job["run_id"], job.get("kind", "answer"), baseline)
         return {"rule": RULE, "baseline_model": baseline, "rows": rows, "totals": totals(rows)}
     finally:
@@ -173,18 +179,27 @@ def job_usage(root, job, baseline=DEFAULT_BASELINE):
 
 def summary(jobs, thread_id=None):
     rows, seen = [], set()
+    unavailable = set()
     for job in jobs:
         if thread_id is not None and job.get("thread_id") != thread_id:
             continue
+        if (job.get("token_usage") or {}).get("unavailable"):
+            unavailable.add(job.get("run_id") or job.get("job_id"))
         for row in (job.get("token_usage") or {}).get("rows", []):
             if row["request_id"] not in seen:
                 seen.add(row["request_id"])
                 rows.append(row)
+    measured = totals(rows)
+    if unavailable:
+        for field in ("estimated_avoided_openai_tokens", "estimated_all_openai_baseline",
+                      "estimated_net_saved_tokens", "estimated_net_saved_percent"):
+            measured[field] = None
     return {
         "rule": RULE,
         "baseline_models": sorted({r["baseline_model"] for r in rows}),
-        "totals": totals(rows),
+        "totals": measured,
         "requests": rows,
+        "unavailable_jobs": len(unavailable),
         "assumptions": "Estimated all-OpenAI baseline performs the same non-review stages, "
         "using recorded prompts and local visible answers as output-length surrogates. "
         "Paid review is hybrid overhead, subtracted from savings. Chat framing is estimated; "
