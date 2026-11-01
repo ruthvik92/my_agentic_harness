@@ -118,7 +118,7 @@ def _expected_names(agent, execution):
 
 
 def _run_reconcile(agent, execution):
-    row = {"request_ref": agent.store.blobs.put_json(execution.model_dump_json())}
+    row = {"request_ref": agent.store.blobs.put_json(execution)}
     with pytest.raises(recovery.NeedsReconciliation, match="will not be replayed"):
         asyncio.run(recovery.reconcile(agent, row))
 
@@ -273,7 +273,7 @@ def test_foreign_identity_no_fallback(tmp_path, monkeypatch, mutate):
 
     agent.executor.inspect = inspect
 
-    row = {"request_ref": agent.store.blobs.put_json(execution.model_dump_json())}
+    row = {"request_ref": agent.store.blobs.put_json(execution)}
     with pytest.raises(recovery.NeedsReconciliation, match="ownership mismatch"):
         asyncio.run(recovery.reconcile(agent, row))
 
