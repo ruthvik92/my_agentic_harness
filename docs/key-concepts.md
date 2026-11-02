@@ -204,6 +204,13 @@ can build/select a prepared image using allowed downloads; this does not enable
 network access inside ordinary coding or test containers. Dependency preparation
 can use committed locks and cached images for reproducibility.
 
+For a genuinely missing runtime or package, the model can call
+`environment_inventory`, then ask `prepare_environment` to install it into a
+Docker image. A missing project file, incorrect command path, incomplete DOM mock
+or failing assertion needs a source/test correction instead. See the
+[run failure diagnosis](run-failure-diagnosis.md) for concrete examples, installation
+requests and the difference between tool paths and command working directories.
+
 **Discovery** finds an installed tool. A **self-test** demonstrates a capability
 works. Chromium being present is weaker evidence than a successful click/type/
 reload/persistence self-test. A browser self-test is still separate from testing

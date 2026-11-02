@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from bisect import bisect_right
 from contextlib import ExitStack, contextmanager
 
 ROOT = "/workspace"
@@ -19,6 +20,39 @@ TRUSTED = "/opt/local-agent"
 
 def content_hash(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def read_payload(data, start, end, metadata):
+    """Fit a byte slice and its continuation metadata inside a tool preview.
+
+    JSON escaping can expand even an 8192-byte slice beyond the executor's
+    16384-byte preview. Bound the serialized result, not just its raw content.
+    """
+    def payload(stop):
+        return {
+            **metadata,
+            "content": data[start:stop].decode("utf-8", errors="replace"),
+            "byte_offset": start,
+            "total_bytes": len(data),
+            "next_byte_offset": stop if stop < len(data) else None,
+            "truncated": stop < len(data),
+        }
+
+    low, high = start, end
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(json.dumps(payload(middle), ensure_ascii=False).encode("utf-8")) <= 15000:
+            low = middle
+        else:
+            high = middle - 1
+    # Normal sequential pages must not split a UTF-8 character. Explicit offsets
+    # inside a character still use replacement decoding, as evidence reads do.
+    try:
+        data[start:low].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if exc.reason == "unexpected end of data" and exc.start > 0:
+            low = start + exc.start
+    return payload(low)
 
 
 def parts(path):
@@ -161,6 +195,24 @@ def operate(tool, args, environment=None):
             raise ValueError("binary file")
         lines = text.splitlines(keepends=True)
         start, limit = args.get("line_offset", 0), args.get("line_limit", 100)
+        if "byte_limit" in args:
+            offsets = [0]
+            for line in lines:
+                offsets.append(offsets[-1] + len(line.encode("utf-8")))
+            byte_start = min(args.get("byte_offset", 0), len(data))
+            if byte_start:
+                start = bisect_right(offsets, byte_start) - 1
+            else:
+                start = min(start, len(lines))
+                byte_start = offsets[start]
+            end = min(offsets[min(start + limit, len(lines))],
+                      byte_start + args["byte_limit"])
+            result = read_payload(data, byte_start, end, {"content_hash": content_hash(data)})
+            next_byte = result["next_byte_offset"]
+            result.update(line_offset=start, next_line=(
+                bisect_right(offsets, next_byte) - 1 if next_byte is not None else None
+            ))
+            return result
         return {
             "content": "".join(lines[start : start + limit]),
             "content_hash": content_hash(data),

@@ -1,5 +1,6 @@
 """Command diagnoses route recovery without guessing installs or replaying mutations."""
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -45,6 +46,80 @@ def test_browser_alternative_only_advertised_when_verified():
     assert 'already verified' not in guidance(failure)
     message = guidance(failure, {'capabilities': {'browser_interaction': {'available': True}}})
     assert '/workspace/tools/harness_browser_test.py' in message
+
+
+@pytest.mark.parametrize('output', [
+    "Error: Cannot find module '/workspace/project/scratch/find_seed.js'\nMODULE_NOT_FOUND",
+    "Error: Cannot find module './helper.js'\nMODULE_NOT_FOUND",
+    "Error: Cannot find module '../js/game.js'\nMODULE_NOT_FOUND",
+    "Error: Cannot find module 'scratch/helper.js'\nMODULE_NOT_FOUND",
+    "Error: Cannot find module 'C:\\work\\helper.js'\nMODULE_NOT_FOUND",
+    "Error: ENOENT: no such file or directory, open '/workspace/js/leaderboard.js'",
+])
+def test_local_files_are_not_cached_as_missing_dependencies(output):
+    failure = diagnose('failed', 1, output)
+    assert failure['kind'] == 'missing_path'
+    assert failure['next_action'] == 'inspect_arguments'
+    hint = guidance(failure)
+    assert "cwd='project'" in hint
+    assert '/workspace/scratch/helper.js' in hint
+    assert 'prepare_environment' not in hint
+
+
+@pytest.mark.parametrize('output', [
+    "Error: Cannot find module 'ws'\nMODULE_NOT_FOUND",
+    "Error: Cannot find package '@scope/package' imported from /workspace/project/test.mjs",
+    "ModuleNotFoundError: No module named 'pydantic'",
+])
+def test_external_dependencies_direct_model_to_docker_preparation(output):
+    failure = diagnose('failed', 1, output)
+    assert failure['kind'] == 'missing_dependency'
+    assert failure['next_action'] == 'prepare_environment'
+    hint = guidance(failure)
+    for field in ('environment_inventory', 'prepare_environment', 'runtimes',
+                  'python_packages', 'dependency_manifests', 'project/package-lock.json'):
+        assert field in hint
+
+
+def test_missing_runtime_launch_is_distinct_from_a_missing_script_input():
+    output = json.dumps({'error': 'FileNotFoundError',
+                         'detail': "[Errno 2] No such file or directory: 'node'"})
+    failure = diagnose('failed', 1, output, arguments={'argv': ['node', 'tests/check.js']})
+    assert failure['kind'] == 'missing_executable'
+    assert failure['subject'] == 'node'
+    assert failure['next_action'] == 'prepare_environment'
+    assert 'runtimes' in guidance(failure)
+    # The same filename alone does not prove that the executable was absent.
+    failure = diagnose('failed', 1, output, arguments={'argv': ['python', 'check.py']})
+    assert failure['kind'] == 'missing_path'
+    failure = diagnose('failed', 1, "FileNotFoundError: [Errno 2] No such file or directory: 'node'",
+                       arguments={'argv': ['node', 'tests/check.js']})
+    assert failure['kind'] == 'missing_path'
+
+
+@pytest.mark.parametrize('detail', [None, [], {}, 123])
+def test_untrusted_missing_file_report_cannot_break_diagnostics(detail):
+    output = json.dumps({'error': 'FileNotFoundError', 'detail': detail})
+    assert diagnose('failed', 1, output, arguments={'argv': ['node']})['kind'] == 'missing_path'
+
+
+def test_preparation_clears_dependency_memory_and_keeps_workspace(agent, docker):  # noqa: F811
+    args = {'argv': ['python', '-c', 'import pydantic'], 'cwd': 'project'}
+    result = SimpleNamespace(output_ref=agent.store.blobs.put(b'missing pydantic'),
+                             execution_id='test', status='failed')
+    record(agent, args, result, diagnose('failed', 1, "No module named 'pydantic'"))
+    assert cached(agent, args)
+    before = (agent.path / 'project/keep.txt').read_bytes()
+    _, prepared = asyncio.run(call(agent, 'prepare_environment', {
+        'reason': 'The selected project requires pydantic',
+        'python_packages': ['pydantic==2.13.4'],
+    }))
+    assert prepared.status == 'succeeded'
+    assert agent.store.blobs.json(prepared.output_ref)['status'] == 'ready'
+    assert not cached(agent, args)
+    assert (agent.path / 'project/keep.txt').read_bytes() == before
+    assert any(command[0] == 'build' for command in docker[0])
+    assert audit(agent.store, agent.run_id)['ok']
 
 
 def test_negative_memory_invalidates_with_source_image_and_success(agent):  # noqa: F811

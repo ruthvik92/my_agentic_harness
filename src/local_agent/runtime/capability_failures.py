@@ -11,7 +11,7 @@ from local_agent.runtime.repair_progress import command_kind, source_state
 from local_agent.storage.blobs import canonical, digest
 
 
-def diagnose(status, exit_code, output, error=''):
+def diagnose(status, exit_code, output, error='', arguments=None):
     text = (error or '') + '\n' + (output or '')
     kind, action, subject = 'command_error', 'inspect_command', None
     if status == 'succeeded' and exit_code == 0:
@@ -39,14 +39,30 @@ def diagnose(status, exit_code, output, error=''):
             kind = report.get('status') if report.get('status') in routes else 'command_error'
             return {'kind': kind, 'detail': text.strip()[-240:],
                     'next_action': routes.get(kind, 'inspect_command'), 'subject': None}
-        module = re.search(r"(?:Cannot find module|No module named)\s+['\"]([^'\"\n]{1,160})", text)
+        module = re.search(r"(?:Cannot find (?:module|package)|No module named)\s+['\"]([^'\"\n]{1,160})", text)
         if module or 'MODULE_NOT_FOUND' in text or 'ModuleNotFoundError' in text:
             kind, action = 'missing_dependency', 'prepare_environment'
             subject = module.group(1) if module else None
+            if subject and (
+                subject.startswith(('/', './', '../', 'file:', 'project/', 'scratch/',
+                                    'tools/', 'memory/', 'outputs/'))
+                or re.match(r'^[A-Za-z]:[\\/]', subject)
+            ):
+                kind, action = 'missing_path', 'inspect_arguments'
         elif exit_code == 127 or re.search(r'command not found|executable.*not found', text, re.I):
             kind, action = 'missing_executable', 'prepare_environment'
-        elif 'FileNotFoundError' in text:
+        elif 'FileNotFoundError' in text or re.search(r'\bENOENT\b|no such file or directory', text, re.I):
             kind, action = 'missing_path', 'inspect_arguments'
+            # A structured worker failure from launching argv[0] differs from
+            # a running project script trying to open a nonexistent local file.
+            argv = (arguments or {}).get('argv') or []
+            detail = report.get('detail') if isinstance(report, dict) else None
+            missing = re.search(r"no such file or directory:\s*['\"]([^'\"\n]+)['\"]",
+                                detail, re.I) if isinstance(detail, str) else None
+            if (isinstance(report, dict) and report.get('error') == 'FileNotFoundError'
+                    and argv and missing and missing.group(1) == argv[0]
+                    and not any(char in argv[0] for char in '/\\')):
+                kind, action, subject = 'missing_executable', 'prepare_environment', argv[0]
         elif re.search(r'AssertionError|\bFAILED\b|\btest failed\b', text, re.I):
             kind, action = 'test_failure', 'inspect_test'
     return {'kind': kind, 'detail': text.strip()[-240:], 'next_action': action, 'subject': subject}
@@ -59,6 +75,12 @@ def guidance(failure, inventory=None):
                    'does not install it. Inspect project manifests/import paths; use the approved '
                    'prepare_environment tool for external dependencies if policy permits, or report '
                    'an environment blocker. Do not install arbitrary package names from stderr. '
+                   'Call environment_inventory first. Request runtimes with runtimes, Python '
+                   'registry requirements with python_packages, or locked project dependencies '
+                   'with dependency_manifests. For npm, supply both project/package.json and '
+                   'project/package-lock.json (adjust for a repository subdirectory). '
+                   'The harness installs into a Docker image and preserves workspace files; '
+                   'do not run ad-hoc host installs. '
                    'Do not retry the unchanged command until environment or project state changes.')
         if (inventory or {}).get('capabilities', {}).get('browser_interaction', {}).get('available'):
             message += (' Interactive browser control is already verified via the shared runner: '
@@ -70,7 +92,7 @@ def guidance(failure, inventory=None):
         'timeout': 'Command exceeded its deadline. Inspect readiness, waits and child-process cleanup; bound the work before retrying. A timeout does not establish a project assertion failure.',
         'output_limit': 'Reduce captured output or split the operation; inspect retained evidence before retrying.',
         'test_failure': 'Inspect the failing assertion and relevant test/source. A reproduced defect can be the expected test-first red phase; do not install packages to fix an assertion.',
-        'missing_path': 'Inspect the missing path and command arguments. This does not by itself establish a missing external package.',
+        'missing_path': "Inspect the missing path and command arguments, not package installation. Tool paths start at /workspace, but command argv paths are relative to cwd: with cwd='project', scratch/helper.js refers to project/scratch/helper.js; use /workspace/scratch/helper.js for a helper written to scratch/helper.js. Resolve project modules under /workspace/project. This does not establish a missing external package.",
         'invalid_plan': 'Correct the browser plan fields using the runner --help and the recorded schema error.',
         'cancelled': 'This command was cancelled. Inspect partial effects; do not silently rerun it.',
         'command_error': 'Inspect captured command and resource evidence before choosing a different action; no specific dependency or argument fix was established.',

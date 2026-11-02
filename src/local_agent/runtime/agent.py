@@ -684,7 +684,8 @@ class Agent:
                     output = self.store.blobs.read(result.output_ref)[:65536].decode(
                         "utf-8", errors="replace"
                     )
-                failure = diagnose(result.status, result.exit_code, output, result.error)
+                failure = diagnose(result.status, result.exit_code, output, result.error,
+                                   arguments=normalized["arguments"])
                 record(self, normalized["arguments"], result, failure)
                 if failure["kind"] != "none":
                     preview["failure"] = failure

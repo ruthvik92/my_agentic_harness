@@ -3,12 +3,16 @@
 GUIDE = """Tool operations run inside offline Docker, rooted at /workspace. Tool paths are
 workspace-relative, e.g. project/src/app.py; cwd='project' means /workspace/project.
 cwd is a directory argument, not a shell command. Omit cwd to use the task directory.
+Tool paths and command argv paths have different bases: scratch/helper.js passed
+to write_file is /workspace/scratch/helper.js. To run it with cwd='project', use
+argv=['node','/workspace/scratch/helper.js'], not ['node','scratch/helper.js'].
 Never use '.', './', absolute host paths, or '..' in path arguments. argv is an
 array of executable arguments, not shell text. For environment variables use
 ['env','PYTHONPATH=src','python','-m','pytest','-q']; do not put 'X=y' in argv[0].
 Read named files directly; avoid repeatedly listing or rereading unchanged pages.
 read_file returns content_hash and pagination. For the next page use returned
 next_line as line_offset (and next_byte_offset as byte_offset when present).
+byte_offset is an absolute file byte position and takes precedence over line_offset.
 When replacing an existing file, read it first, then write_file with BOTH
 create_only=false AND expected_hash equal to its returned content_hash. To create
 a new file use create_only=true and omit expected_hash. Prefer a small patch_file:
