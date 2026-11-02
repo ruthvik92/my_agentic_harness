@@ -43,7 +43,7 @@ time.sleep(60)
         def alive(pid):
             try:
                 return open('/proc/' + str(pid) + '/stat').read().split()[2] != 'Z'
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 return False
 
         deadline = time.monotonic() + 5
