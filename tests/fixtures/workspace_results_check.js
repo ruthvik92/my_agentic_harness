@@ -35,6 +35,18 @@ async function main() {
   follow.disabled=false;follow.handlers.click();check(continued===workspace,'continue binds workspace without manual ID');
   check(sessionPanel.children.some(n=>n.tag==='details'&&n.children.some(c=>c.textContent==='patch mismatch')),'failed attempt remains visible');
   function all(node){return [node,...(node.children || []).flatMap(all)];}
+  const attached={original_task:'Keep <script>literal</script>',unresolved_checks:[{status:'failed'}]};
+  for(const workspace of [undefined,null,'']) {
+    const failed=panel({mode:'coding',job_status:'failed',workspace,task_context:attached});
+    check(failed.children.length===1,'failed reply without workspace must still render context');
+    const viewer=failed.children[0];
+    check(viewer.tag==='details' && viewer.children[0].textContent==='Previous task context attached','context remains expandable after timeout');
+    check(viewer.children[1].textContent===JSON.stringify(attached,null,2),'attached context uses literal text');
+    check(!all(failed).some(n=>n.tag==='input'),'missing workspace must not fabricate an edited path');
+  }
+  const completed=panel({mode:'coding',workspace:'/data/ws',task_context:attached});
+  check(all(completed).filter(n=>n.textContent==='Previous task context attached').length===1,'successful reply shows context once');
+  check(all(completed).some(n=>n.tag==='input'),'workspace controls remain present with context');
   const diagnostic={job_id:'a'.repeat(32),run_id:'run_failure',workspace_id:'ws_stable',status:'budget_exhausted',summary:'Model-turn limit reached: 30/30',model:'local',provider:'ollama',counts:{model_requests:30,tool_calls:2,failed_tools:1},limits:{max_model_turns:30},usage:{input_tokens:500,output_tokens:20},actions:[{tool:'run_command',status:'failed',command:['python','-m','pytest'],exit_code:1,cause:'<script>failure</script>',execution_id:'exec_'+'b'.repeat(32),output_available:true,preview_truncated:true}]};
   const timeline=new Element('div');let requests=[];
   globalThis.fetch=async path=>{requests.push(path);return {ok:true,json:async()=>path.endsWith('/output') ? {text:'x'.repeat(10000)+'END OF FAILURE',retained_bytes:10014,capture_limit_reached:false,capture_size_known:true} : []};};

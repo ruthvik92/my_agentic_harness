@@ -2,7 +2,15 @@
 (function () {
   'use strict';
   function append(parent, result) {
-    if (result.mode !== 'coding' || typeof result.workspace !== 'string' || !result.workspace) return;
+    if (result.mode !== 'coding') return;
+    if(result.task_context) {
+      const context=document.createElement('details');
+      context.className='workspace-result';
+      context.appendChild(make('summary','Previous task context attached'));
+      context.appendChild(make('pre',JSON.stringify(result.task_context,null,2)));
+      parent.appendChild(context);
+    }
+    if (typeof result.workspace !== 'string' || !result.workspace) return;
     const panel = document.createElement('div');
     panel.className = 'workspace-result';
     const git = result.git_workspace;
@@ -19,6 +27,7 @@
       panel.appendChild(source);
     }
     if (git) {
+      panel.appendChild(make('p','Git history: host-managed worktree. Sandbox project copies may have no Git history.'));
       for (const [label, value] of [
         ['Workspace ID', git.workspace_id || git.branch.replace(/^agent\//, '')],
         ['Branch', git.branch], ['Base branch', git.base_branch || 'detached HEAD'],
@@ -115,6 +124,7 @@
     if(data.repair_progress) {
       const p=data.repair_progress;
       root.appendChild(make('p','Repair stage: '+p.stage+' · '+p.actions+' observed actions · last milestone at action '+p.last_milestone+' · recoveries: '+p.recoveries+' · '+p.decision+' ('+p.mode+')'));
+      if(p.warning)root.appendChild(make('p',p.warning));
       if(p.monitor_error) root.appendChild(make('p','Progress measurement blocked: '+p.monitor_error));
     }
     root.appendChild(make('p',(counts.model_requests || 0)+' model requests'+
@@ -133,6 +143,13 @@
         (action.exit_code == null ? '' : ' · exit '+action.exit_code)));
       if(action.command) detail.appendChild(make('pre','Command argv: '+JSON.stringify(action.command)));
       if(action.actor === 'controller') detail.appendChild(make('p','Independent controller command'));
+      if(action.failure)detail.appendChild(make('p','Failure category: '+action.failure.kind));
+      if(action.feedback?.failing_assertions)detail.appendChild(make('pre','Failing assertion / evidence: '+action.feedback.failing_assertions));
+      if(action.feedback) {
+        const f=action.feedback;
+        detail.appendChild(make('p','Failure count: '+f.failure_count+' · Remaining retries: '+f.remaining_retries+' · '+f.changes_since_previous));
+        if(f.warning)detail.appendChild(make('p',f.warning));
+      }
       if(action.cause) detail.appendChild(make('pre',action.cause));
       const pids=action.resource_usage?.pids;
       if(action.status === 'process_limit' && pids?.after) {
@@ -195,6 +212,8 @@
       const next=make('button','Continue this workspace'); next.type='button'; next.className='workspace-session-control';
       next.addEventListener('click',()=>{if(!next.disabled) actions.continue(workspace);}); panel.appendChild(next);
       if(actions.startLoop){
+        const complete=make('button','Loop until complete…');complete.type='button';complete.className='workspace-session-control';
+        complete.addEventListener('click',()=>{if(!complete.disabled)actions.startLoop(workspace,'completion');});panel.appendChild(complete);
         const loop=make('button','Loop until approved…');loop.type='button';loop.className='workspace-session-control';
         loop.addEventListener('click',()=>{if(!loop.disabled)actions.startLoop(workspace);});panel.appendChild(loop);
       }

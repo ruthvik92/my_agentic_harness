@@ -115,6 +115,43 @@ def test_repair_uses_saved_target_and_evidence_outside_history(repair_server):
     assert len(captured) == 1
 
 
+def test_additional_context_reaches_prompt_saved_evidence_and_same_worktree(repair_server):
+    server, tid, payload, _, captured, report, _ = repair_server
+    manager = GitWorktrees(Workspaces(server.root))
+    original = manager.load(report['target']['workspace_id'])
+    context = 'Focus on F2 and F3.\nPreserve score-entry behavior. <literal>'
+    submit_review_repair(server, tid, {**payload, 'additional_context': context})
+    request, _, metadata = captured[0]
+    assert context in request['question']
+    assert context in metadata['question']
+    assert request['repair_context']['evidence']['additional_context'] == context
+    assert request['question'].index(context) < request['question'].index('untrusted evidence')
+    assert 'CRLF' in request['question']
+    assert request['continue_workspace_id'] == original['workspace_id']
+    assert manager.load(original['workspace_id']) == original
+    assert 'branch' not in request and 'base_ref' not in request
+
+
+@pytest.mark.parametrize('context', [None, True, 12, [], {}, 'x' * 4001])
+def test_invalid_additional_context_is_rejected_before_queueing(repair_server, context):
+    server, tid, payload, _, captured, _, _ = repair_server
+    with pytest.raises(ValueError, match='Additional repair context'):
+        submit_review_repair(server, tid, {**payload, 'additional_context': context})
+    assert not captured
+    assert not server.threads.get(tid).get('pending_job')
+
+
+def test_full_context_survives_long_review_prompt_and_stays_bounded(repair_server):
+    server, tid, payload, _, captured, report, _ = repair_server
+    report['verdict']['summary'] = 'finding ' * 4000
+    context = 'x' * 3996 + 'END!'
+    submit_review_repair(server, tid, {**payload, 'additional_context': context})
+    request = captured[0][0]
+    assert context in request['question']
+    assert len(request['question']) <= 8000
+    assert request['repair_context']['evidence']['verdict'].startswith('finding ')
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -294,10 +331,11 @@ def test_repair_http_requires_auth_and_uses_saved_report(repair_server):
                 == 403
             )
             assert client.post(route, json={**payload, "workspace": "/forged"}).status_code == 400
-            response = client.post(route, json=payload)
+            response = client.post(route, json={**payload, 'additional_context': 'Focus on F2 and F3.'})
             assert response.status_code == 202, response.text
             assert response.json()["job_id"] == "c" * 32
             assert len(captured) == 1
+            assert 'Focus on F2 and F3.' in captured[0][0]['question']
             assert client.post(route, json=payload).status_code == 400
             assert len(captured) == 1
     finally:

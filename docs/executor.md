@@ -34,6 +34,53 @@ labels are diagnostic metadata only and never grant authority. See
 [model capability probes](model-capability-probes.md) for the probe role and
 container naming.
 
+### Why choose one mode over the other?
+
+| Concern | Ephemeral | Persistent |
+| --- | --- | --- |
+| Container lifetime | Fresh container per invocation | Compatible keeper reused between calls |
+| Mounted workspace files | Preserved on the host | Preserved on the host |
+| Container `/tmp` | Lost when the container is removed | Retained until cleanup or container removal |
+| Background processes | End with the container | Can keep running between calls |
+| Main benefit | Clean execution without earlier container-local state | Less startup overhead and continuity for servers and temporary setup |
+
+Use ephemeral execution when you want each call to rely on the prepared image
+and saved workspace. Persistent execution is useful for iterative development,
+such as keeping a development server running across several tool calls.
+Independent checks and reviews use ephemeral containers to avoid depending on
+the coding keeper's temporary state. Workspace files can still carry state
+between ephemeral calls; ephemeral execution does not reset the project.
+
+Neither mode increases the model's conversation memory. Saved code, container
+state, and model context have separate lifetimes. See
+[context and helpers](context-helpers.md) for request construction and trimming.
+
+### Temporary files and persistence
+
+`/tmp` is temporary space inside the container, separate from the host's `/tmp`
+and from `/workspace`. The executor mounts it as a **128 MiB tmpfs**, backed by
+memory, with `nosuid,nodev,noexec`. It also sets `HOME=/tmp`, so tools using the
+home directory may put their settings or caches there.
+
+Depending on the commands and libraries used, it can contain browser test
+profiles, temporary test files, compiler scratch files, downloaded/unpacked files,
+and home-directory caches. These are examples, not files that every run creates.
+Important deliverables and dependencies should use the mounted workspace or a
+prepared image rather than relying on `/tmp`.
+
+Ephemeral containers lose `/tmp` when removed. Persistent keepers retain it
+between calls, but tools may delete their own files earlier, and expiry, stopping,
+or replacing the keeper discards it. Losing `/tmp` does not delete the project
+under `/workspace/project`. It also does not remove similarly named files in the
+host's `/tmp`.
+
+The mount and default environment are defined in
+[docker.py](../src/local_agent/executor/docker.py), with command environments
+constructed in [worker.py](../src/local_agent/executor/worker.py). For host-to-container
+workspace paths, see [where worktrees live](git-workspaces.md#where-worktrees-live-and-how-docker-sees-them).
+
+### Configuration example
+
 Add this block to an existing agent YAML (including `coder.yaml` or `analog.yaml`):
 
 ```yaml

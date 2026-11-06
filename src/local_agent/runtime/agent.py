@@ -268,6 +268,7 @@ class Agent:
                 self.checkpoint()
                 return None
         if self.test_plan is not None:
+            self.event("project.checks_started", "controller", {})
             from local_agent.testing.checks import changed_files, run_checks
             from local_agent.testing.plans import resolve, seal
 
@@ -296,11 +297,14 @@ class Agent:
             try:
                 report, _, _ = await run_checks(
                     self.store,
-                    self.config,
+                    self.config.model_copy(update={"limits": self.config.limits.model_copy(update={
+                        "run_timeout_seconds": max(1, int(self.deadline - time.monotonic()))
+                    })}),
                     self.path / "project",
                     plan,
                     self.sandbox,
                     locked=True,
+                    deadline=self.deadline,
                 )
             except (RuntimeError, ValueError) as exc:
                 report = {
@@ -319,6 +323,7 @@ class Agent:
             self.event(
                 "project.tests", "controller", {"report_ref": self.store.blobs.put_json(report)}
             )
+            self.check()
             if (
                 report["status"] != "passed"
                 and self.test_retries < 2
@@ -418,7 +423,19 @@ class Agent:
         if self.progress_path is not None and self.created:
             from local_agent.executor.lifecycle import publish
 
-            publish(Path(self.progress_path), {"run_id": self.run_id, "phase": kind})
+            if kind == "project.checks_started":
+                self.progress_stage = "controller checks"
+            elif kind == "project.tests":
+                self.progress_stage = "publishing candidate"
+            elif kind.startswith("model."):
+                self.progress_stage = "local inference" if self.config.provider == "ollama" else "reviewer inference"
+            elif kind.startswith("environment."):
+                self.progress_stage = "environment preparation"
+            elif kind.startswith("execution.") and getattr(self, "progress_stage", None) != "controller checks":
+                self.progress_stage = "tool execution"
+            guard = getattr(self, "repair_guard", None)
+            publish(Path(self.progress_path), {"run_id": self.run_id, "phase": getattr(self, "progress_stage", "preparation"),
+                "recovery": {k: guard.state.get(k) for k in ("stage", "decision", "recoveries", "warning")} if guard else None})
         return self.last
 
     def request(
@@ -582,11 +599,21 @@ class Agent:
 
             fact = cached(self, normalized["arguments"])
             if fact:
+                skips = sum(e.event_type == "tool.skipped" and e.data.get("reason") == "unchanged_unavailable_capability"
+                            for e in self.store.events(self.run_id))
+                allowance = max(1, self.config.repair_progress.recovery_allowance * self.config.repair_progress.max_recoveries)
+                if skips >= allowance:
+                    from local_agent.runtime.repair_progress import LocalStalled
+
+                    raise LocalStalled("Repeated unchanged failing commands exhausted bounded recovery; work preserved")
                 preview = {
-                    "status": "environment_blocked",
+                    "status": "environment_blocked" if fact["failure"]["kind"] in {"missing_dependency", "missing_executable"} else "recovery_required",
                     "executed": False,
                     "error": "unchanged_unavailable_capability",
                     "failure": fact["failure"],
+                    "feedback": fact.get("feedback"),
+                    "recovery_actions_remaining": allowance - skips,
+                    "warning": "Final recovery action before stalled stop" if allowance - skips == 1 else fact.get("feedback", {}).get("warning", ""),
                     "evidence_ref": fact["output_ref"],
                     "correction": fact["correction"],
                 }
@@ -649,17 +676,6 @@ class Agent:
             if call.name not in {"environment_inventory", "prepare_environment"}:
                 await self.executor.release(execution.execution_id)
             preview = result_preview(self.store, result, call.name)
-            preparation_ready = (
-                call.name == "prepare_environment"
-                and result.output_ref
-                and self.store.blobs.json(result.output_ref).get("status") == "ready"
-            )
-            if result.status == "succeeded" and (
-                call.name in {"write_file", "patch_file", "execute_tool"} or preparation_ready
-            ):
-                from local_agent.runtime.capability_failures import invalidate
-
-                invalidate(self, "successful tool may have changed workspace dependencies")
             if (
                 not trusted
                 and result.status == "succeeded"
@@ -686,13 +702,15 @@ class Agent:
                     )
                 failure = diagnose(result.status, result.exit_code, output, result.error,
                                    arguments=normalized["arguments"])
-                record(self, normalized["arguments"], result, failure)
+                feedback = record(self, normalized["arguments"], result, failure)
+                if feedback:
+                    preview["feedback"] = feedback
                 if failure["kind"] != "none":
                     preview["failure"] = failure
                     preview["correction"] = guidance(failure, self.environment_inventory)
             elif result.status != "succeeded" and not trusted:
                 preview["correction"] = correction(call.name, arguments, str(preview))
-            if result.status != "succeeded":
+            if result.status != "succeeded" and call.name != "run_command":
                 self.failures[decision.normalized_request_hash] += 1
                 if (
                     self.failures[decision.normalized_request_hash]

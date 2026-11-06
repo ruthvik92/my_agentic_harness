@@ -86,6 +86,37 @@ def test_ledger_restores_without_resetting_recovery_or_double_counting():
     assert restored.state['recoveries'] == 1
 
 
+def test_failed_check_survives_other_passing_suites_and_restore_until_passing_rerun():
+    guard = RepairProgress(policy(inspection_allowance=100), {'app.js': 'x'}, [])
+    failed = action(1, ['node', 'tests/test_obstacles.js'], status='failed', exit_code=1)
+    failed['failure_excerpt'] = 'Wide block delta should be less than regular delta'
+    guard.observe([failed], {'app.js': 'x'})
+    for i in range(2, 15):
+        guard.observe([action(i, ['node', f'tests/test_other_{i}.js'])], {'app.js': 'x'})
+    restored = RepairProgress(policy(), {}, [], restored=copy.deepcopy(guard.state))
+    pending = restored.public()['unresolved_checks']
+    assert len(pending) == 1
+    assert pending[0]['argv'] == ['node', 'tests/test_obstacles.js']
+    assert 'Wide block delta' in pending[0]['failure_excerpt']
+    restored.observe([action(15, ['node', 'tests/test_obstacles.js'])], {'app.js': 'fixed'})
+    assert restored.public()['unresolved_checks'] == []
+
+
+def test_public_ledger_bounds_pending_failure_evidence():
+    from local_agent.storage.blobs import canonical
+
+    guard = RepairProgress(policy(), {}, [])
+    for i in range(1, 18):
+        item = action(i, ['node', f'tests/test_{i}.js', *['x' * 256] * 10],
+                      status='failed', exit_code=1)
+        item['failure_excerpt'] = 'failure ' * 200
+        guard.observe([item], {})
+    public = guard.public()
+    assert public['unresolved_checks']
+    assert len(canonical(public)) <= 14000
+    assert len(guard.state['unresolved_checks']) == 16
+
+
 def test_long_investigation_and_observation_policy_are_configurable():
     guard = RepairProgress(policy(mode='observe', inspection_allowance=100), {'app.py': 'x'}, [])
     items = [action(i, tool='read_file') for i in range(1, 41)]
@@ -178,3 +209,16 @@ def test_a_diagnosed_setup_blocker_is_evidence_but_repeated_setup_is_not():
     guard.observe([{**first, 'sequence': 2}], {'app.py': 'x'})
     assert guard.state['last_milestone'] == 1
     assert len(guard.public()['setup']) == 1
+
+
+def test_varying_failures_without_edits_do_not_create_new_milestones():
+    guard = RepairProgress(policy(inspection_allowance=4), {'app.py': 'x'}, [])
+    guard.observe([action(1, ['pytest'], status='failed', exit_code=1)], {'app.py': 'x'})
+    milestone = guard.state['last_milestone']
+    for n in range(2, 9):
+        guard.observe([action(n, ['pytest'], status='failed', exit_code=n % 3 + 1)], {'app.py': 'x'})
+        if guard.state['decision'] == 'local_stalled':
+            break
+    assert guard.state['last_milestone'] == milestone
+    assert guard.state['decision'] == 'local_stalled'
+    assert guard.state['warning']

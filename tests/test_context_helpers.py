@@ -35,6 +35,62 @@ def test_compaction_has_hashed_lineage_and_keeps_constraints(tmp_path):
     store.close()
 
 
+def inspection_group(index, *, command=None, output="unchanged diff", status="succeeded"):
+    return [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": f"call_{index}",
+         "function": {"name": "run_command", "arguments": {
+             "argv": command or ["git", "diff", "--", "tests/test_obstacles.js"]}}}]},
+        {"role": "tool", "tool_call_id": f"call_{index}", "content": json.dumps({
+            "status": status, "exit_code": 0, "preview": output,
+            "evidence_ref": "blob://" + "a" * 64})},
+    ]
+
+
+def test_repeated_successful_inspection_keeps_failure_context_and_newest_exchange(tmp_path):
+    store = Store(tmp_path / "data")
+    config = load_config(Path("config/coder.yaml"))
+    builder = ContextBuilder(store.blobs, config)
+    failure = [{"role": "user", "content": "Unresolved obstacle assertion"}]
+    groups = [failure, *[inspection_group(i, output="diff" * 4000) for i in range(18)]]
+    snapshot, _ = builder.build([{"role": "system", "content": "Original task"}], groups)
+    assert failure[0] in snapshot.messages
+    assert sum(m["role"] == "tool" for m in snapshot.messages) == 1
+    assert any(m.get("tool_call_id") == "call_17" for m in snapshot.messages)
+    assert "18 times without intervening work" in snapshot.messages[-1]["content"]
+    assert len(snapshot.exclusions) == 17
+    for item in snapshot.exclusions:
+        assert item["reason"] == "repeated_inspection"
+        assert store.blobs.json(item["source_ref"]) in groups
+    store.close()
+
+
+def test_alternating_identical_file_reads_are_coalesced(tmp_path):
+    store = Store(tmp_path / 'data')
+    builder = ContextBuilder(store.blobs, load_config(Path('config/coder.yaml')))
+    groups = [inspection_group(i, command=['git', 'show', str(i % 2)]) for i in range(20)]
+    snapshot, _ = builder.build([], groups)
+    assert sum(m['role'] == 'tool' for m in snapshot.messages) == 2
+    assert len(snapshot.exclusions) == 18
+    assert '10 times without intervening work' in snapshot.messages[-1]['content']
+    store.close()
+
+
+@pytest.mark.parametrize("groups", [
+    [inspection_group(1), inspection_group(2, output="changed diff")],
+    [inspection_group(i, command=["node", "tests/test_obstacles.js"]) for i in range(3)],
+    [inspection_group(i, command=["git", "commit", "-m", "change"]) for i in range(3)],
+    [inspection_group(i, status="failed") for i in range(3)],
+    [inspection_group(1), [{"role": "user", "content": "Source changed"}], inspection_group(2)],
+])
+def test_coalescing_preserves_changed_results_tests_mutations_and_failures(tmp_path, groups):
+    store = Store(tmp_path / "data")
+    builder = ContextBuilder(store.blobs, load_config(Path("config/coder.yaml")))
+    snapshot, _ = builder.build([], groups)
+    assert list(snapshot.messages) == [m for group in groups for m in group]
+    assert not snapshot.exclusions
+    store.close()
+
+
 def test_large_output_late_slice_and_denied_foreign_reference(tmp_path, request):
     image = request.config.getoption("--docker-image")
     if image is None:

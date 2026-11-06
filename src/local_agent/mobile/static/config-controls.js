@@ -14,7 +14,7 @@
     ['config-edit', 'config-cancel', 'config-select', 'config-editor-file', 'config-name', 'config-content', 'config-new',
      'config-clone', 'config-load', 'config-validate', 'config-save', 'config-refresh',
      'workspace-input', 'pdf-input', 'page-input', 'dpi-input', 'context-page-input',
-     'region-input', 'model-select', 'execution-mode', 'task-mode', 'base-ref',
+     'region-input', 'model-select', 'run-limit-minutes', 'n-last-chats', 'execution-mode', 'task-mode', 'base-ref',
      'continue-workspace', 'working-directory'].forEach((id) => { const n = el(id); if (n) n.disabled = d; });
   }
   function fillSelect(node, names, current) {
@@ -27,6 +27,7 @@
     el('workspace-fields').hidden = mode === 'chat';
     el('circuit-fields').hidden = mode !== 'circuit';
     el('coding-fields').hidden = mode !== 'coding';
+    el('task-history-fields').hidden = mode !== 'coding';
     const continuing = el('task-mode').value === 'continue';
     el('new-task-fields').hidden = continuing;
     el('continue-task-fields').hidden = !continuing;
@@ -46,6 +47,9 @@
     selected = profiles.find((x) => x.name === name && x.kind === 'agent' && x.valid) || null;
     el('config-select').value = selected ? selected.name : '';
     setDetail(detailText(selected));
+    const runtime=el('run-limit-minutes');
+    if(runtime){runtime.value='';runtime.placeholder='Profile default: '+((selected?.limits?.run_timeout_seconds || 1200)/60)+' minutes';}
+
     updateVisibility();
     const execution = el('execution-mode');
     execution.value = '';
@@ -194,6 +198,9 @@
       return;
     }
     setDetail(detailText(selected));
+    const runtime=el('run-limit-minutes');
+    if(runtime){runtime.value='';runtime.placeholder='Profile default: '+((selected?.limits?.run_timeout_seconds || 1200)/60)+' minutes';}
+
     updateVisibility();
     if (!el('workspace-input').value && allowedRoots && allowedRoots.length)
       el('workspace-input').value = allowedRoots[0];
@@ -212,10 +219,23 @@
     });
     node.value = (prevValue && (entries || []).some((e) => e.selectable && e.id === prevValue)) ? prevValue : '';
   }
+  function historyLimit() {
+    const value = el('n-last-chats').value;
+    const count = value === '' ? 8 : strictInt(value);
+    if (!Number.isInteger(count) || count < 1 || count > 100)
+      throw new Error('Task history must be 1 to 100 whole chats');
+    return count;
+  }
   function requestFields() {
     if (!selected) throw new Error('No valid profile selected');
     const mode = selected.mode;
     const out = { profile_name: selected.name };
+    const runtime=el('run-limit-minutes');
+    if(runtime && runtime.value!=='') {
+      const minutes=strictInt(runtime.value);
+      if(!Number.isInteger(minutes) || minutes<1 || minutes>1440)throw new Error('Agent run limit must be 1 to 1440 whole minutes');
+      out.run_limit_minutes=minutes;
+    }
     const execution = el('execution-mode').value;
     if (!el('execution-fields').hidden && execution) {
       if (!['ephemeral', 'persistent'].includes(execution)) throw new Error('Invalid execution mode');
@@ -227,6 +247,7 @@
       out.workspace = ws;
     }
     if (mode === 'coding') {
+      out.n_last_chats = historyLimit();
       if (el('task-mode').value === 'continue') {
         const id = el('continue-workspace').value.trim();
         if (!/^ws_[a-f0-9]{32}$/.test(id)) throw new Error('Enter the previous ws_ workspace ID');

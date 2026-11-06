@@ -49,7 +49,7 @@ related run IDs. These events live in separate audited activity runs because
 completed model runs are immutable. Their run IDs work with `trace`, `audit` and
 recorded replay; they have zero inference/tools. A paid reviewer is a separate
 OpenAI model run and remains `completed_unverified`, not a simulator-backed
-`completion.verified` result. See [phone guide](phone.md).
+`completion.verified` result. See [review types and request evidence](reviews.md).
 
 ## Why a row contains mostly IDs
 

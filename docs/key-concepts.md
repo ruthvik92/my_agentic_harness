@@ -154,7 +154,9 @@ it does not restrict access to the rest of the imported repository.
 Publication creates a candidate. Review assesses that candidate. Merge integrates
 it into the intended source branch. These are separate actions.
 
-See [Git workspaces](git-workspaces.md).
+See [Git workspaces](git-workspaces.md), including
+[storage locations and Docker mounts](git-workspaces.md#where-worktrees-live-and-how-docker-sees-them)
+and [branch versus worktree](git-workspaces.md#branch-versus-worktree-what-stays-unchanged-until-merge).
 
 ## 7. Sandboxing, trust boundaries and attestation
 
@@ -193,6 +195,9 @@ so they do not depend on a potentially modified coding session.
 
 Persistence of code, container state and model context are three separate concerns.
 
+See [why choose each mode](executor.md#why-choose-one-mode-over-the-other) and
+[what lives in container `/tmp`](executor.md#temporary-files-and-persistence).
+
 ## 9. Environment preparation and capabilities
 
 A **dependency** is software a project needs. An **environment inventory**
@@ -208,7 +213,7 @@ For a genuinely missing runtime or package, the model can call
 `environment_inventory`, then ask `prepare_environment` to install it into a
 Docker image. A missing project file, incorrect command path, incomplete DOM mock
 or failing assertion needs a source/test correction instead. See the
-[run failure diagnosis](run-failure-diagnosis.md) for concrete examples, installation
+[historical run diagnosis](run-failure-diagnosis.md) for concrete examples, installation
 requests and the difference between tool paths and command working directories.
 
 **Discovery** finds an installed tool. A **self-test** demonstrates a capability
@@ -324,13 +329,29 @@ context trimming and recovery.
 
 Repeated reads or capability probes do not necessarily advance the repair.
 Bounded recovery redirects stalled attempts and can stop a reviewed repair as
-`local_stalled`. Missing-capability memory also prevents identical futile command
-retries when the relevant source/image/arguments have not changed.
+`local_stalled`. Failure memory suppresses repeated unchanged failing commands,
+including missing dependencies, bad paths and failing assertions. Reads, targeted
+edits, diagnostics and Docker preparation remain available. A meaningful measured
+file or image change permits a new attempt, within the existing recovery limits.
+Different failures on unchanged source are possible nondeterminism, not a repair
+milestone.
+
+**Loop until complete** reuses a workspace locally until a candidate is published,
+configured controller checks pass, and the attempt/check audits pass. It reports
+“Complete — checks passed; not reviewer-approved.” It cannot invoke paid review or
+paid diagnosis. **Loop until approved** remains the separate reviewer-backed
+workflow. Neither automatically merges. See [browser loops](browser.md#workspace-sessions-and-bounded-loops).
 
 **Budgets** bound model turns, tool attempts, context, output, time and evidence.
 The inspected coder profile allows 60 model turns, 100 attempted tool calls,
 1,200 seconds per run and 360 seconds per model call. Other enforced limits
-can stop a run earlier. Larger budgets do not guarantee useful progress.
+can stop a run earlier. The browser's optional **Agent run limit — minutes**
+overrides the selected profile for a submission or each loop attempt. **Loop total
+budget — minutes** bounds all attempts and checks; the remaining total caps each
+stage. Continuation carries unresolved checks and a recovery plan, inspectable as
+“Previous task context attached.” Larger budgets do not guarantee useful progress.
+
+For the review types, shared data, and exact context bounds, see [reviews](reviews.md).
 
 Paid review is explicitly enabled/authorized. Automatic review eligibility
 requires a completed local attempt, audited published candidate and audited

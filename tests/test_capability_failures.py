@@ -144,8 +144,8 @@ def test_negative_memory_invalidates_with_source_image_and_success(agent):  # no
     record(agent, {'argv': ['node', '--version']}, result, diagnose('succeeded', 0, 'v18'))
     assert cached(agent, args), 'pure probes must not erase known missing dependencies'
     record(agent, {'argv': ['python', 'setup.py']}, result, diagnose('succeeded', 0, 'installed'))
-    assert not cached(agent, args)
-    assert not fixed_context(agent)
+    assert cached(agent, args), 'success without measured changes cannot erase failure evidence'
+    assert fixed_context(agent)
 
 
 def test_skip_is_audited_without_execution(agent):  # noqa: F811
@@ -304,3 +304,56 @@ def test_cached_preparation_rechecks_interactions(agent, docker, monkeypatch):  
     payload = json.loads(result.preview)
     assert payload['status'] == 'environment_blocked'
     assert 'Cached image failed' in payload['error']
+
+
+@pytest.mark.parametrize('kind,output', [
+    ('missing_path', "FileNotFoundError: helper.py"),
+    ('test_failure', 'AssertionError: score must be 10'),
+    ('git_history_unavailable', 'fatal: not a git repository'),
+])
+def test_unchanged_failures_block_but_reads_and_measured_edits_allow_recovery(agent, kind, output):  # noqa: F811
+    args = {'argv': ['python', 'tests/check.py'], 'cwd': 'project'}
+    result = SimpleNamespace(output_ref=agent.store.blobs.put(output.encode()), execution_id='test', status='failed')
+    failure = diagnose('failed', 1, output)
+    assert failure['kind'] == kind
+    first = record(agent, args, result, failure)
+    assert first['failure_count'] == 1 and first['remaining_retries'] == 1
+    assert not cached(agent, args)
+    second = record(agent, args, result, failure)
+    assert second['failure_count'] == 2 and second['remaining_retries'] == 0
+    assert second['warning']
+    assert cached(agent, args)
+    preview, executed = asyncio.run(call(agent, 'run_command', args))
+    assert executed is None and preview['status'] == 'recovery_required'
+    assert preview['feedback']['failing_assertions']
+    assert not cached(agent, {'argv': ['python', '--version']})
+    (agent.path / 'scratch/helper.py').write_text('print("changed helper")')
+    assert not cached(agent, args), 'a meaningful helper edit permits another command attempt'
+    (agent.path / 'scratch/helper.py').unlink()
+    assert cached(agent, args)
+    assert audit(agent.store, agent.run_id)['ok']
+
+
+def test_successful_diagnostics_do_not_erase_failure_memory(agent):  # noqa: F811
+    args = {'argv': ['pytest', '-q'], 'cwd': 'project'}
+    result = SimpleNamespace(output_ref=agent.store.blobs.put(b'AssertionError'), execution_id='test', status='failed')
+    for _ in range(2):
+        record(agent, args, result, diagnose('failed', 1, 'AssertionError'))
+    result.status = 'succeeded'
+    record(agent, {'argv': ['git', 'status']}, result, diagnose('succeeded', 0, 'clean'))
+    assert cached(agent, args)
+
+
+def test_repeated_suppressed_commands_eventually_stall_with_warning(agent):  # noqa: F811
+    from local_agent.runtime.repair_progress import LocalStalled
+
+    args = {'argv': ['node', '-e', "require('missing')"], 'cwd': 'project'}
+    result = SimpleNamespace(output_ref=agent.store.blobs.put(b'missing'), execution_id='test', status='failed')
+    record(agent, args, result, diagnose('failed', 1, "Cannot find module 'missing'"))
+    limit = agent.config.repair_progress.recovery_allowance * agent.config.repair_progress.max_recoveries
+    for _ in range(limit):
+        preview, executed = asyncio.run(call(agent, 'run_command', args))
+        assert not executed
+        assert preview['recovery_actions_remaining'] >= 1
+    with pytest.raises(LocalStalled):
+        asyncio.run(call(agent, 'run_command', args))

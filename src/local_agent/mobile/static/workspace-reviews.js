@@ -82,11 +82,34 @@
     if (['changes_requested', 'failed'].includes(report.status) &&
         !['merged', 'merging'].includes(report.merge?.status)) {
       const repair = control(make('button', 'Fix with local model')); repair.type = 'button';
-      repair.addEventListener('click', () => {
-        if (!repair.disabled) actions.repair(result);
+      const options = make('fieldset'); options.hidden = true;
+      options.appendChild(make('legend', 'Local repair'));
+      options.appendChild(make('p', 'Continues this reviewed workspace and agent branch with the saved findings and test output.'));
+      const label = make('label', 'Additional repair context (optional, up to 4,000 characters)');
+      const context = control(make('textarea')); context.rows = 6; context.maxLength = 4000;
+      context.value = '';
+      context.setAttribute('aria-label', 'Additional repair context');
+      context.placeholder = 'Add priorities, constraints, or details for the local model.';
+      label.appendChild(context); options.appendChild(label);
+      const start = control(make('button', 'Start local repair')); start.type = 'button';
+      start.addEventListener('click', () => {
+        if (start.disabled) return;
+        if (context.value.length > 4000) {
+          actions.error('Additional repair context must be at most 4,000 characters.'); return;
+        }
+        actions.repair(result, context.value.trim());
       });
-      panel.appendChild(repair);
-      panel.appendChild(make('p', 'Continues this candidate with the selected local coding model, saved review findings and test output.'));
+      const cancel = control(make('button', 'Cancel')); cancel.type = 'button';
+      cancel.addEventListener('click', () => {
+        if (!cancel.disabled) { options.hidden = true; repair.hidden = false; }
+      });
+      options.appendChild(start); options.appendChild(cancel);
+      repair.addEventListener('click', () => {
+        if (!repair.disabled) {
+          options.hidden = false; repair.hidden = true; context.focus?.();
+        }
+      });
+      panel.appendChild(repair); panel.appendChild(options);
     }
     if (report.merge?.status === 'merged') {
       panel.appendChild(make('p', 'Merged into ' + report.merge.branch + ': ' + report.merge.commit));

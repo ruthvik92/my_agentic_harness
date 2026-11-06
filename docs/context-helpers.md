@@ -1,12 +1,24 @@
 # Context, evidence and helpers
 
-The 8k profile reserves 2k for output. The input estimate covers the complete JSON
+The selected profile's estimated input budget is `window_tokens` minus
+`output_reserve_tokens`. For example, an 8,192-token window with a 2,048-token
+output reserve leaves 6,144 estimated input tokens; these are example values,
+not the coding or review defaults. The input estimate covers the complete JSON
 payload, including all schemas. Fixed instructions and the task remain present;
 selection removes entire assistant/tool exchange groups. Every omitted group is
 retained as immutable evidence. `context.compacted` records the deterministic
 rule, input hashes, derived index and preserved constraints. This index is working
 memory, not authoritative instructions. Provider input counts exceeding the input
 budget stop dispatch. The byte-based estimate is conservative, not an exact tokenizer.
+
+Identical successful inspections within an uninterrupted inspection sequence are
+coalesced in active context, with the newest complete exchange retained and the
+original evidence preserved. Changed results, failed actions, tests, and mutation
+boundaries remain distinct. A controller note identifies repeated inspection.
+Repair ledgers keep unresolved test commands and failure excerpts until a passing
+rerun of the same command and directory. Review-specific progress summaries are
+separate. See [review context and paid usage](reviews.md#context-per-request-and-total-paid-usage)
+and [the context builder](../src/local_agent/runtime/context.py).
 
 Tool results contain bounded previews and evidence references. To retrieve later
 bytes, use `read_file(evidence_ref="blob://...", byte_offset=30000, byte_limit=8192)`.

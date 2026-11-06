@@ -1,5 +1,9 @@
 # Runtime boundaries
 
+For the design goals and how individual modules implement them, see
+[Harness characteristics and implementation](harness-characteristics.md).
+That guide also explains the local-authoring/compact-paid-review objective.
+
 The runtime is sequential and asynchronous. `Agent` orchestrates native Ollama
 requests, strict validation, deterministic policy, committed dispatch intents,
 Docker execution, bounded context, checkpoints and independent verification.
@@ -60,3 +64,23 @@ collection and broad shared-helper promotion are intentionally separate work.
 References: [Pydantic strict validation](https://docs.pydantic.dev/latest/concepts/strict_mode/),
 [OpenTelemetry instrumentation](https://opentelemetry.io/docs/languages/python/instrumentation/),
 [SQLite durability](https://www.sqlite.org/pragma.html#pragma_synchronous).
+
+
+Browser loops persist controller state and frozen configurations separately from
+agent runs. `mobile.loops.Loops` schedules both local completion and reviewer
+approval modes against the same workspace. Completion uses the existing audited
+candidate/check eligibility gate with no review receipts; its paid-review and
+paid-diagnosis gates are always false. An explicit mode and runtime override are
+validated before submission. Per-attempt runtime inherits the profile unless
+replaced; nested checks inherit the remaining monotonic deadline. A subprocess
+wall deadline also caps preflight, preparation and checks by the total loop budget.
+
+Failure facts bind command/cwd to measured project/helper files and the selected
+sandbox image. Suppression is recorded as a skipped tool, never an invented
+execution result. Reads/edits and environment preparation remain available, while
+repeated suppressed commands and missing milestones retain bounded recovery stops.
+Continuation carries unresolved evidence and a short plan. File snapshots compare
+unpublished changes as well as published candidate state; varying failures alone
+cannot reset a stalled loop. Progress files expose logical execution/check stages
+and recovery status. Server restart marks jobs/loops interrupted without replay.
+See [browser loops](browser.md#workspace-sessions-and-bounded-loops).

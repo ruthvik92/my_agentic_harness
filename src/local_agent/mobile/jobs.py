@@ -140,11 +140,17 @@ class Jobs:
                     "--request", str(request_path)]
             for root in self.allowed_roots:
                 argv.extend(["--allow-root", str(root)])
+        job = self.get(request_path.parent.name) or {}
+        timeout = chosen.limits.run_timeout_seconds * (2 if request.get("mode") == "workspace-review" else 1) + 120
+        if job.get("loop_deadline") is not None:
+            timeout = min(chosen.limits.run_timeout_seconds, job["loop_deadline"] - time.time())
+            if timeout <= 0:
+                raise TimeoutError("Loop total budget exhausted before this stage started")
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            timeout=chosen.limits.run_timeout_seconds * (2 if request.get("mode") == "workspace-review" else 1) + 120,
+            timeout=timeout,
             check=False,
         )
         try:
@@ -226,6 +232,13 @@ class Jobs:
                             store.close()
                     except (OSError, ValueError, KeyError, sqlite3.Error):
                         pass
+                    if isinstance(exc, subprocess.TimeoutExpired) and job.get("run_id"):
+                        try:
+                            from local_agent.mobile.timeout_recovery import retire_timed_out_run
+
+                            job["timeout_recovery"] = retire_timed_out_run(self.root, job["run_id"])
+                        except (OSError, ValueError, RuntimeError, sqlite3.Error) as recovery_error:
+                            job["timeout_recovery"] = {"status": "blocked", "error": str(recovery_error)}
                 if self.on_result:
                     self.callback_job = job
                     try:

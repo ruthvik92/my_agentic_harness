@@ -106,8 +106,9 @@ class BrowserAgent(ScreenshotAgent):
         if task is None and manifest.get("task_context_ref"):
             task = self.store.blobs.json(manifest["task_context_ref"])
         review = (repair or {}).get("evidence") or (task or {}).get("latest_review")
-        if not review or not self.config.instructions_version.startswith("coder-"):
+        if (not review and not task) or not self.config.instructions_version.startswith("coder-"):
             return
+        review = review or {"summary": "Complete the original task and resolve controller checks"}
         if not hasattr(self, "repair_guard"):
             saved = [e for e in self.store.events(self.run_id) if e.event_type == "repair.progress"]
             restored = self.store.blobs.json(saved[-1].data["state_ref"]) if saved else None
@@ -205,6 +206,9 @@ class BrowserAgent(ScreenshotAgent):
                 "Controller repair ledger persists findings and measured progress across context trimming. "
                 "Read scratch/repair-ledger.json for full evidence. A successful capability probe is not "
                 "repair progress. Use the known inventory instead of enumerating API symbols. "
+                "Unresolved checks remain failures even when other suites pass. Address those "
+                "commands before inspecting Git history; sandbox Git history is not the host "
+                "managed worktree history. Read their output_ref evidence for failing assertions. "
                 + ("Recovery required: stop general inspection/probing. Reproduce a specific finding, "
                    "add a targeted regression, make a justified repair, or report a concrete blocker. "
                    if guard.state["decision"] == "recover" else "")})

@@ -4,7 +4,7 @@ function check(value, message) { if (!value) throw new Error(message); }
 class Element {
   constructor(tag = 'div') {
     this.tag = tag; this.children = []; this.dataset = {}; this.attrs = {}; this.handlers = {};
-    this.value = ''; this.style = {}; this.hidden = false; this.classes = new Set();
+    this.value = ''; this.style = {}; this.hidden = false; this.classes = new Set(); this.parentElement={};
     this.classList = {
       add: name => this.classes.add(name), remove: name => this.classes.delete(name),
       contains: name => this.classes.has(name),
@@ -26,7 +26,7 @@ const nodes = {}, stored = new Map([['threadId','first']]);
 globalThis.window = globalThis;
 globalThis.document = {
   getElementById: id => nodes[id] ||= new Element(), createElement: tag => new Element(tag),
-  querySelectorAll: () => []
+  querySelectorAll: () => [], querySelector: () => null
 };
 globalThis.Option = class extends Element { constructor(text,value) { super('option'); this.textContent=text; this.value=value; } };
 globalThis.localStorage = {getItem:key => stored.get(key) || null, setItem:(key,value) => stored.set(key,value), removeItem:key => stored.delete(key)};
@@ -37,7 +37,7 @@ const threads = [
   {thread_id:'first',title:'First saved chat',messages:[{role:'user',content:'q'},{role:'assistant',content:'a',mode:'coding',job_id:'coding-job',workspace:'/sandbox/ws_mock',git_workspace:{candidate_commit:'commit',base_branch:'main',workspace_id:'ws_mock',branch:'agent/ws_mock',worktree:'/sandbox/ws_mock/project'}},{role:'user',content:'review'},{role:'assistant',kind:'review',content:'I cannot run tests'}],image:'saved-image',mime:'image/png'},
   {thread_id:'second',title:'Second saved chat',messages:[{role:'user',content:'q2'},{role:'assistant',content:'a2'}],image:null}
 ];
-let holdSecond = false, releaseSecond = null, jobRunning = false, submitted = null;
+let holdSecond = false, releaseSecond = null, jobRunning = false, submitted = null, completedReview = false;
 let fakeLoop=null, loopSubmissions=0;
 const usageReport = count => ({totals:{
   measured_local_input:count, measured_local_output:0, measured_local_total:count,
@@ -52,6 +52,7 @@ globalThis.fetch = async (url, options) => {
   else if (path === '/models') value = {models:[],verifier:{enabled:true,models:[{id:'openai:test',model:'test',provider:'openai',capabilities:[],selectable:true}]}};
   else if (path === '/threads') value = threads;
   else if (path.endsWith('/workspace-review')) { submitted = {path,body:JSON.parse(options.body)}; value = {job_id:'job'}; }
+  else if (path.endsWith('/repair-review')) { submitted = {path,body:JSON.parse(options.body)}; value = {job_id:'repair-job'}; }
   else if (path.endsWith('/loops/mock-loop/stop')) {fakeLoop.status='stopped';value=fakeLoop;}
   else if (path.endsWith('/loops')) {
     if(options?.method==='POST'){
@@ -70,7 +71,7 @@ globalThis.fetch = async (url, options) => {
     }
     value = usageReport(path === '/usage' ? 999 : path === '/threads/first/usage' ? 123 : 456);
   }
-  else if (path.startsWith('/jobs/')) value = {status:'running',model:'local',kind:'answer'};
+  else if (path.startsWith('/jobs/')) value = {status:completedReview?'completed':'running',model:'local',kind:'answer',answer:'Synthetic review complete'};
   else if (path.startsWith('/threads/')) {
     const id = path.split('/')[2];
     if (id === 'second' && holdSecond) await new Promise(resolve => { releaseSecond = resolve; });
@@ -98,6 +99,21 @@ async function main() {
   codingReply.job_status='completed';delete codingReply.error;render();
   check(candidatePanels().length===1,'completed coding result must offer candidate review');
   if(globalThis.checkLoopControls){
+    if(globalThis.checkCompletionControls){
+      showLoopOptions({workspace_id:'ws_mock',git_workspace:{worktree:'/worktree'}},'completion');
+      node('loop-local').value='12';node('loop-minutes').value='60';node('loop-tokens').value='100000';
+      node('loop-paid').value='5';node('loop-consent').checked=true;node('run-limit-minutes').value='9';
+      node('n-last-chats').value='3';
+      check(node('loop-paid').hidden,'completion hides paid configuration');
+      await node('loop-start').handlers.click();
+      check(loopSubmissions===1 && submitted.body.mode==='completion','completion binds explicit mode');
+      check(submitted.body.authorize_paid===false && submitted.body.max_paid_reviews===0,'completion never authorizes paid calls');
+      check(!submitted.body.reviewer_model_id && submitted.body.run_limit_minutes===9,'runtime override propagates without a reviewer');
+      check(submitted.body.n_last_chats===3,'history choice propagates into loop submission');
+      fakeLoop.status='complete';await refreshLoops();
+      check(node('loop-status').textContent.includes('Complete — checks passed; not reviewer-approved.'),'completion label is distinct');
+      print('Local completion controls and runtime checks passed');return;
+    }
     showLoopOptions({workspace_id:'ws_mock',git_workspace:{worktree:'/worktree'}});
     for(const [id,value] of [['loop-paid','5'],['loop-local','12'],['loop-minutes','60'],['loop-tokens','100000']])node(id).value=value;
     node('loop-consent').checked=false;
@@ -175,6 +191,18 @@ async function main() {
   const beforeRepair=submitted;
   await repairWorkspaceReview({job_id:'review-job',workspace_review:{target:{candidate_commit:'commit'}}});
   check(submitted===beforeRepair,'active job must prevent a duplicate repair submission');
+  for (let i=0; i<20; i++) await Promise.resolve();
+  completedReview = true;
+  await poll();
+  completedReview = false;
+  node('config-select').value='coder.yaml';
+  window.ConfigControls.mode=()=>'coding';
+  const extraContext='Focus on F2 and F3.\nPreserve the current branch.';
+  await repairWorkspaceReview({job_id:'review-job',workspace_review:{target:{candidate_commit:'commit'}}},extraContext);
+  check(submitted.path==='/threads/first/repair-review','repair must use the authenticated repair endpoint: '+node('error-banner').textContent);
+  check(submitted.body.additional_context===extraContext,'repair composer instructions reach the API');
+  check(submitted.body.review_job_id==='review-job' && submitted.body.candidate_commit==='commit','repair stays bound to the saved review and candidate');
+  check(!('workspace' in submitted.body) && !('branch' in submitted.body),'client cannot choose a replacement workspace or branch');
   print('Browser history restoration, new chat, navigation lock and review checks passed');
 }
 const loop = new GLib.MainLoop(null, false);

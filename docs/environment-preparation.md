@@ -123,3 +123,22 @@ mappings in `environments/service.py` are operator-owned extension points. Custo
 OS images, private authenticated registries, local dependency trees, and other
 package managers need additional adapters; unsupported requests are not silently
 treated as prepared environments.
+
+
+## Preparation during bounded recovery
+
+A missing external dependency/executable routes to inventory and approved Docker
+preparation. An incorrect local path, failing assertion or missing sandbox Git
+history requires different diagnostics; it does not justify installing a package.
+Repeated unchanged failing commands are suppressed while reads, edits, diagnostics
+and preparation remain available. Changes to measured project/helper contents or
+the selected prepared image permit another attempt. A successful diagnostic or
+no-op preparation does not establish that a dependency or defect was fixed.
+
+The browser's agent runtime limit applies to the local attempt; a loop also has a
+total wall-clock budget across preparation, attempts and controller checks. The
+remaining total caps the next stage, and preparation cannot authorize a stage
+outside it. A hard controller timeout can leave effects requiring reconciliation;
+inspect the retained trace before starting further work. Completion loops keep
+recovery local and cannot invoke paid diagnosis or review. See
+[browser loops](browser.md#workspace-sessions-and-bounded-loops).

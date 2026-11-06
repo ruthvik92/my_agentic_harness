@@ -283,9 +283,11 @@ def test_job_is_publicly_complete_only_after_callback_persists(tmp_path):
         jobs.close()
 
 
-def test_controller_error_keeps_the_progress_run_and_workspace(tmp_path):
+@pytest.mark.parametrize('timed_out', [False, True])
+def test_controller_error_keeps_the_progress_run_and_workspace(tmp_path, timed_out):
     import asyncio
     import json
+    import subprocess
     import time
     from pathlib import Path
 
@@ -301,6 +303,8 @@ def test_controller_error_keeps_the_progress_run_and_workspace(tmp_path):
 
     def runner(path):
         path.with_name("progress.json").write_text(json.dumps({"run_id": result["run_id"]}))
+        if timed_out:
+            raise subprocess.TimeoutExpired(['controller'], 25)
         raise RuntimeError("Controller timed out before returning JSON")
 
     jobs = Jobs(
@@ -320,6 +324,8 @@ def test_controller_error_keeps_the_progress_run_and_workspace(tmp_path):
         assert job["run_id"] == result["run_id"]
         assert job["workspace_id"] == manifest["workspace_id"]
         assert "timed out" in job["error"]
+        if timed_out:
+            assert job['timeout_recovery'] == {'status': result['status'], 'retired': False}
     finally:
         jobs.close()
 
@@ -415,3 +421,181 @@ def test_local_stall_stops_loop_without_paid_rescue(loop_case):
     state = server.loops.load(state['loop_id'])
     assert state['status'] == 'local_stalled' and state['paid_attempts'] == 0
     assert not any(job.get('loop_stage') in {'review', 'diagnostic'} for job in jobs.values())
+
+
+def test_pre_run_failure_keeps_original_error_instead_of_unknown_run(loop_case):
+    from local_agent.storage.database import Store
+
+    server, tid, payload, jobs, captured, _ = loop_case
+    state = server.loops.start(tid, payload)
+    store = Store(server.root)
+    store.close()
+    job = jobs[state['active_job_id']]
+    job.update(status='failed', run_id='run_' + 'a' * 32,
+               error='Previous task is active; stop or finish it before continuing')
+    server.loops.after(job)
+    result = server.loops.load(state['loop_id'])
+    assert result['status'] == 'blocked'
+    assert 'Previous task is active' in result['reason']
+    assert 'before a durable run was created' in result['reason']
+    assert 'unknown run' not in result['reason']
+    assert result['paid_attempts'] == 0
+    assert len(captured) == 1
+
+
+
+def completion_payload(payload, **extra):
+    return {**payload, 'mode': 'completion', 'authorize_paid': False, 'max_paid_reviews': 0, **extra}
+
+
+@pytest.mark.parametrize("mode", ["completion", "approval"])
+def test_loop_retains_history_limit_across_attempts(loop_case, mode):
+    server, tid, payload, _, captured, finish = loop_case
+    state = server.loops.start(tid, {
+        **payload, "mode": mode, "authorize_paid": False,
+        "max_paid_reviews": 0, "n_last_chats": 2,
+    })
+    first = captured[-1][0]["task_context"]["attempts"][0]["run_id"]
+    for _ in range(3):
+        assert state["n_last_chats"] == 2
+        context = captured[-1][0]["task_context"]
+        assert context["n_last_chats"] == captured[-1][2]["n_last_chats"] == 2
+        assert context["attempts"][0]["run_id"] == first
+        assert len(context["attempts"]) <= 2
+        previous_run = "run_" + state["active_job_id"]
+        state = finish(state["loop_id"], passed=False)
+        assert state["status"] == "running"
+        assert captured[-1][0]["task_context"]["attempts"][-1]["run_id"] == previous_run
+    server.loops.stop(tid, state["loop_id"])
+
+
+@pytest.mark.parametrize("value", [True, 0, 101, "3", 2.5, None])
+def test_loop_rejects_invalid_history_limit_before_submission(loop_case, value):
+    server, tid, payload, _, captured, _ = loop_case
+    with pytest.raises(ValueError, match="n_last_chats"):
+        server.loops.start(tid, {**payload, "n_last_chats": value})
+    assert not captured
+
+
+def test_completion_requires_published_candidate_checks_and_both_audits(loop_case):
+    server, tid, payload, jobs, captured, finish = loop_case
+    state = server.loops.start(tid, completion_payload(payload, run_limit_minutes=7))
+    assert state['run_timeout_seconds'] == 420
+    assert captured[-1][1].limits.run_timeout_seconds <= 420
+    state = finish(state['loop_id'])
+    assert state['status'] == 'complete'
+    assert state['reason'] == 'Complete — checks passed; not reviewer-approved.'
+    assert state['paid_attempts'] == 0
+    assert not any(j.get('loop_stage') != 'local' for j in jobs.values() if j.get('loop_id'))
+
+
+@pytest.mark.parametrize('broken', ['candidate', 'checks_audit', 'run_audit', 'checks', 'stale'])
+def test_completion_rejects_incomplete_evidence(loop_case, broken):
+    server, tid, payload, jobs, _, _ = loop_case
+    state = server.loops.start(tid, completion_payload(payload, max_local_cycles=1))
+    job = jobs[state['active_job_id']]
+    manager = GitWorktrees(Workspaces(server.root))
+    record = manager.load(payload['workspace_id'])
+    record.update(run_id='run_new', candidate_tree='tree')
+    manager.save(record)
+    job.update(status='completed', run_id='run_new', audit={'ok': True},
+               git_workspace=manager.public(payload['workspace_id']),
+               project_tests={'status': 'passed', 'audit': {'ok': True}})
+    if broken == 'candidate':
+        job['git_workspace']['candidate_commit'] = None
+    elif broken == 'checks_audit':
+        job['project_tests']['audit'] = {'ok': False}
+    elif broken == 'run_audit':
+        job['audit'] = {'ok': False}
+    elif broken == 'checks':
+        job['project_tests']['status'] = 'no_test_plan'
+    else:
+        record['run_id'] = 'run_other'
+        manager.save(record)
+    server.loops.after(job)
+    final = server.loops.load(state['loop_id'])
+    assert final['status'] == 'budget_exhausted'
+    assert final['completion_blocker']
+    assert final['paid_attempts'] == 0
+
+
+@pytest.mark.parametrize('extra', [{'authorize_paid': True}, {'max_paid_reviews': 1},
+                                 {'reviewer_model_id': 'openai:forbidden'}])
+def test_completion_rejects_paid_settings_before_model_selection(loop_case, extra):
+    server, tid, payload, _, captured, _ = loop_case
+    server.models.select_reviewer = lambda *_a, **_kw: pytest.fail('paid reviewer selected')
+    with pytest.raises(ValueError, match='local-only'):
+        server.loops.start(tid, completion_payload(payload, **extra))
+    assert not captured
+
+
+def test_completion_failures_never_invoke_paid_diagnosis_even_with_forged_allowance(loop_case):
+    server, tid, payload, jobs, _, _ = loop_case
+    server.models.select_reviewer = lambda *_a, **_kw: pytest.fail('paid reviewer selected')
+    state = server.loops.start(tid, completion_payload(payload))
+    lid = state['loop_id']
+    # A restored state must still guard both entry points independently.
+    state.update(paid_authorized=True)
+    state['limits']['max_paid_reviews'] = 5
+    server.loops.save(state)
+    server.loops.queue_diagnosis(state)
+    failed_local(server, lid, jobs)
+    final = failed_local(server, lid, jobs)
+    assert final['stage'] == 'local' and final['paid_attempts'] == 0
+    assert not any(j.get('loop_stage') in {'review', 'diagnostic'} for j in jobs.values())
+
+
+def test_attempt_runtime_inherits_profile_and_is_capped_by_remaining_budget(loop_case):
+    import time
+
+    server, tid, payload, _, captured, _ = loop_case
+    expected = server.profiles.load('coder.yaml').limits.run_timeout_seconds
+    state = server.loops.start(tid, completion_payload(payload))
+    assert state['run_timeout_seconds'] == expected
+    state['deadline'] = time.time() + 35
+    server.threads.update(tid, pending_job=None)
+    server.loops.queue_local(state)
+    assert 1 <= captured[-1][1].limits.run_timeout_seconds <= 35
+    assert captured[-1][2]['loop_deadline'] == state['deadline']
+
+
+def test_completion_stop_restart_and_budget_do_not_replay_jobs(loop_case):
+    server, tid, payload, jobs, _, finish = loop_case
+    state = server.loops.start(tid, completion_payload(payload))
+    lid = state['loop_id']
+    count = len(jobs)
+    assert server.loops.stop(tid, lid)['status'] == 'interrupted'
+    assert finish(lid)['status'] == 'interrupted'
+    assert len(jobs) == count
+    server.threads.update(tid, pending_job=None)
+    state = server.loops.start(tid, completion_payload(payload))
+    server.loops = Loops(server)
+    assert server.loops.load(state['loop_id'])['status'] == 'interrupted'
+    assert len(jobs) == count + 1
+
+
+def test_unresolved_checks_changes_and_nondeterminism_survive_next_attempt(loop_case):
+    server, tid, payload, jobs, captured, _ = loop_case
+    state = server.loops.start(tid, completion_payload(payload))
+    lid = state['loop_id']
+    for n in range(2):
+        state = server.loops.load(lid)
+        job = jobs[state['active_job_id']]
+        job.update(status='failed', run_id=None, error=f'assert score == {n}',
+                   project_tests={'status': 'test_failed', 'commands': [
+                       {'argv': ['pytest'], 'status': 'failed', 'output': f'AssertionError: {n}'}]})
+        server.loops.after(job)
+    state = server.loops.load(lid)
+    assert state['possible_nondeterminism']
+    context = captured[-1][0]['task_context']
+    assert context['unresolved_checks'][0]['argv'] == ['pytest']
+    assert 'nondeterminism' in context['recovery_plan']
+    assert context['git_history']['sandbox'].startswith('Project copy')
+    # Varying text alone does not indefinitely reset the stall detector.
+    state = failed_local(server, lid, jobs)
+    # Test status changed once; continued identical status must eventually stop.
+    for _ in range(3):
+        if state['status'] != 'running':
+            break
+        state = failed_local(server, lid, jobs)
+    assert state['status'] == 'stalled'

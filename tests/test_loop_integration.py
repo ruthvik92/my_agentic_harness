@@ -106,6 +106,7 @@ def exercise_loop(candidate_data, request, monkeypatch, outcome, start_callback=
                 )
                 containers.append(keeper["container_id"])
                 return result
+            assert outcome != "completion", "Completion loop entered paid review"
             review_count += 1
             calls = 0
 
@@ -204,6 +205,9 @@ def exercise_loop(candidate_data, request, monkeypatch, outcome, start_callback=
                 "reviewer_model_id": "openai:gpt-6-luna",
                 "execution_mode": "persistent",
             }
+            if outcome == "completion":
+                payload.update(mode="completion", authorize_paid=False, max_paid_reviews=0, run_limit_minutes=3)
+                del payload["reviewer_model_id"]
             if outcome == "paid_exhausted":
                 payload["max_paid_reviews"] = 1
             if start_callback is None:
@@ -218,12 +222,12 @@ def exercise_loop(candidate_data, request, monkeypatch, outcome, start_callback=
                 if state["status"] != "running":
                     break
                 time.sleep(0.1)
-            expected = "approved" if outcome == "approved" else "tests_passed_unverified"
+            expected = "complete" if outcome == "completion" else "approved" if outcome == "approved" else "tests_passed_unverified"
             assert state["status"] == expected, state
             assert state["loop_id"] == loop_id
-            expected_local = 6 if outcome == "five_paid_exhausted" else 2
+            expected_local = 1 if outcome == "completion" else 6 if outcome == "five_paid_exhausted" else 2
             expected_paid = (
-                5 if outcome == "five_paid_exhausted" else (2 if outcome == "approved" else 1)
+                0 if outcome == "completion" else 5 if outcome == "five_paid_exhausted" else (2 if outcome == "approved" else 1)
             )
             assert local_count == expected_local and review_count == expected_paid
             assert len(set(containers)) == 1
@@ -277,7 +281,7 @@ def exercise_loop(candidate_data, request, monkeypatch, outcome, start_callback=
                 )
 
 
-@pytest.mark.parametrize("outcome", ["approved", "paid_exhausted", "five_paid_exhausted"])
+@pytest.mark.parametrize("outcome", ["approved", "paid_exhausted", "five_paid_exhausted", "completion"])
 def test_actual_browser_jobs_loop_reuses_workspace_and_stops(
     candidate, request, monkeypatch, outcome
 ):  # noqa: F811

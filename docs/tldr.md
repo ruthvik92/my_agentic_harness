@@ -1,4 +1,4 @@
-# The local agent harness in five minutes
+# CLI quick start
 
 For the browser workflow and the meaning of workspaces, runs, candidates and
 previews, use the [functional instruction manual](functional-manual.md).
@@ -9,7 +9,7 @@ and proposes completion. The harness controls execution, retains evidence and,
 when configured, checks the result independently. You can use native Ollama or an
 OpenAI-compatible Chat Completions server, including OpenAI's hosted API.
 
-## 1. What runs where
+## What runs where
 
 The Python controller runs on your host. It talks to the model server and manages
 records. Every model-generated command, file operation and helper runs inside
@@ -33,7 +33,7 @@ SQLite tracks runs and ordered events; immutable SHA-256 blobs retain actual
 requests, responses, arguments and outputs. That control directory is never
 mounted into tool containers. JSONL is a convenient export, not the source of truth.
 
-## 2. Get a first run
+## Get a first run
 
 You need uv, Docker with cgroup v2 limit support, and a model server. The default
 configuration uses your selected `qwen3:30b-a3b-instruct-2507-q8_0` in Ollama.
@@ -56,7 +56,7 @@ The fixture run should return a run ID, verification status and diff reference.
 To use your own repository, substitute its path and a task file. Omit the fixture
 verifier for tasks it was not designed to check.
 
-## 3. Use the OpenAI interface
+## Use the OpenAI interface
 
 To keep inference local while using the OpenAI wire format:
 
@@ -72,13 +72,17 @@ account, use `api_key_env: OPENAI_API_KEY`, and set
 your usual secret-management method. Do not put its value in YAML. See the
 [detailed guide](guide.md#model-providers) for a complete configuration example.
 
-The adapter sends task/context text to the configured model endpoint. Hosted
-inference therefore sends that context outside the machine; tool execution still
-uses offline Docker. The harness stores the environment variable's name, never
-its secret value. It supports Chat Completions function tools, not Responses,
-vision, audio or streaming. Local servers can use `max_tokens` when required.
+The adapter sends selected task/context text to the configured endpoint; hosted
+inference sends it outside the machine while tools still execute in Docker.
+The environment variable supplies authentication separately from model messages.
+The adapter uses Chat Completions for compatible endpoints and conversation-only
+requests. Official OpenAI workspace reviews and GPT-6 tool-enabled profiles use
+the Responses transport. Image input is supported by compatible selected models;
+this is not an audio or streaming interface. Local servers can use `max_tokens`
+when required. See [provider transport details](guide.md#model-providers) and
+[review context and data sharing](reviews.md).
 
-## 4. Open browser traces
+## Open browser traces
 
 ```bash
 uv run --locked local-agent trace-web
@@ -106,7 +110,7 @@ provider/tool results through state checks without inference or real tools.
 A fresh `run` gets a new ID. It creates a new workspace unless explicitly given
 `--continue-workspace ws_<id>` to continue a managed Git candidate.
 
-## 5. Understand success and recovery
+## Understand success and recovery
 
 A model saying “done” is a proposal. A general task without a configured independent
 verifier ends `completed_unverified`. The supplied calculator, mean and clamp
@@ -125,7 +129,7 @@ inference or terminates the container and records what happened. If evidence
 publication or SQLite commits fail, new dispatch stops. Storage failure can leave
 the ledger at its last nonterminal state; it does not prove no mutation occurred.
 
-## 6. Context, helpers and operating limits
+## Context, helpers and operating limits
 
 The default 8k window reserves 2k for output. The input estimate includes all tool
 schemas. Compaction removes complete exchanges and records their lineage, keeping

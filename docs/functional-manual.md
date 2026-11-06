@@ -3,6 +3,10 @@
 Use this manual to operate the harness from the browser and understand what each
 action changes. Setup options and implementation details are linked where needed.
 
+For installation, start with the [CLI quick start](tldr.md). Use the
+[browser reference](browser.md) to look up a control, [key concepts](key-concepts.md)
+for terminology, and [reviews](reviews.md) for what data goes to paid models.
+
 ## The workflow
 
 The intended division of work is: **the local model writes code and tests; the
@@ -120,10 +124,15 @@ It does not approve those pending edits. A new starting revision cannot be
 selected while continuing.
 
 After a paid review requests changes, select the local coding profile/model and
-choose **Fix with local model**. The controller supplies the original task,
+choose **Fix with local model**. This opens repair options without starting a job.
+Add optional priorities or constraints in **Additional repair context** (up to
+4,000 characters), then choose **Start local repair**, or **Cancel** to close it.
+The repair continues the reviewed workspace's existing worktree and agent branch;
+it creates a new run, not a new worktree. The controller supplies the original task,
 findings, acceptance criteria, and check output. You do not need to paste the
 whole review or reconstruct its paths. The action itself does not start another
 paid review or merge code.
+Your additional context is retained in the submitted task and saved repair evidence.
 
 The repair target must still match the saved review. If another attempt has
 already moved the workspace, an old review's repair action can be rejected.
@@ -155,10 +164,11 @@ is normally required. Unsupported tooling or missing dependencies remain blocker
 **Conversation-only review** is advisory: it reviews chat content, cannot inspect
 the candidate files or run tests, and does not approve a workspace for merging.
 
-The paid workspace reviewer receives the selected commit and its associated
-evidence. It does not inspect your live preview or automatically compare every
-worktree to choose the best one. Interactive gameplay or other user flows are
-verified only when the report records that they were actually exercised.
+For exactly which code, chat excerpts, and test evidence reach the paid model,
+including context caps and per-request usage, see [reviews and data sharing](reviews.md).
+The reviewer inspects the selected candidate, not your live preview or a global
+ranking of worktrees. Interactive flows are verified only when the report records
+that they were actually exercised.
 
 ## Decide which version to use
 
@@ -215,7 +225,22 @@ commit. The existing live-worktree preview is not automatically pinned when a
 review approves a commit. The paid reviewer instead checks its exported candidate
 in its own sandbox; a separate preview is not its authoritative code source.
 
-## Use an automatic repair/review loop
+## Use an automatic completion or approval loop
+
+Choose **Loop until complete…** for local-only completion in the existing
+workspace. The controller requires a published candidate from the current attempt,
+passing configured checks, and valid attempt/check audits. It reports
+**Complete — checks passed; not reviewer-approved.** This mode cannot invoke paid
+review or diagnosis. Stop, interruption, stalling and exhausted budgets preserve
+work. Neither loop mode automatically merges.
+
+**Agent run limit — minutes** inherits the selected profile when blank; an override
+applies to ordinary submissions, local review repairs and each loop attempt.
+**Loop total budget — minutes** covers all attempts, preparation and checks. Each
+stage is capped by its remaining time. The loop panel shows stages, cycles,
+recovery status, elapsed/remaining time and final-attempt warnings. Continuation
+attaches unresolved checks, a recovery plan and labelled host/sandbox history;
+expand **Previous task context attached** to inspect it.
 
 Choose **Loop until approved…** in the workspace panel, select the local model
 and reviewer, and set the local-iteration, paid-attempt, token, and time limits.
@@ -229,7 +254,7 @@ materially new verification evidence. Unchanged content and evidence cannot keep
 triggering paid reviews merely because a new run or commit ID was created.
 
 Loops can stop on approval, stalled work, duplicate review evidence, failed or
-unavailable verification, or scheduling/budget limits. Some failures lead to
+unavailable verification, or time/budget limits. Some failures lead to
 further bounded local attempts; they do not constitute approval. When paid review
 is unavailable and local checks pass, the result is `tests_passed_unverified`.
 Any authorized advisory diagnosis consumes the existing paid allowance and does
@@ -238,7 +263,7 @@ being scheduled; the current bounded stage may finish.
 
 Server restart interrupts active loops and does not automatically replay paid
 requests. Inspect the saved state before explicitly starting another loop.
-See [loop controls and limits](browser.md#workspace-sessions-and-bounded-review-loops).
+See [loop controls and limits](browser.md#workspace-sessions-and-bounded-loops).
 
 ## Read outcomes and investigate failures
 
@@ -286,7 +311,8 @@ Review, repair and previews do not automatically merge or push code.
 Paid charges apply to model requests, not just the final visible report. A review
 job can use several model/tool turns. Use the measured input/output counters;
 input totals include repeated context. Reported reasoning is included in output,
-not an extra total to add again. Hypothetical GPT baselines are estimates, not
+not an extra total to add again. See [review token accounting](reviews.md#context-per-request-and-total-paid-usage).
+Hypothetical GPT baselines are estimates, not
 evidence that a paid model was called. A short visible answer alone does not
 establish low paid output usage. See [repair policy and output allowances](local-repair-reliability.md).
 

@@ -106,6 +106,9 @@ def describe_run(store, run_id, *, action_limit=200):
             for call_id in event.data.get("skipped_call_ids", []):
                 if call_id in actions:
                     actions[call_id].update(status="skipped", cause=event.data.get("reason", ""))
+                    if event.data.get("preview_ref"):
+                        preview = store.blobs.json(event.data["preview_ref"])
+                        actions[call_id].update(failure=preview.get("failure"), feedback=preview.get("feedback"))
         elif event.event_type == "model.failed":
             message = event.data.get("detail", "")
             if event.data.get("response_ref"):
@@ -124,12 +127,17 @@ def describe_run(store, run_id, *, action_limit=200):
             )
         elif event.event_type == "run.stopped":
             stop = event.data.get("reason")
+    for event in events:
+        if event.event_type == "capability.failure" and event.data.get("execution_id"):
+            for action in actions.values():
+                if action.get("execution_id") == event.data["execution_id"]:
+                    action.update(failure=event.data.get("failure"), feedback=event.data.get("feedback"))
     repair_events = [e for e in events if e.event_type == "repair.progress"]
     repair = None
     if repair_events:
         state = store.blobs.json(repair_events[-1].data["state_ref"])
         repair = {key: state.get(key) for key in ("stage", "decision", "actions", "last_milestone",
-                                                 "recoveries", "changed_paths", "monitor_error")}
+                                                 "recoveries", "changed_paths", "monitor_error", "warning")}
         repair["mode"] = repair_events[-1].data.get("mode")
     detail = stop.get("detail", "") if isinstance(stop, dict) else str(stop or "")
     values = list(actions.values())

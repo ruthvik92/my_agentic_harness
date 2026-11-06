@@ -128,10 +128,15 @@ def observations(store, run_id, after=0):
                         status = "environment_blocked"
                 except (ValueError, TypeError, AttributeError):
                     pass
+            excerpt = None
+            if (call["name"] == "run_command" and result["exit_code"] != 0
+                    and result.get("output_ref")
+                    and command_kind(store.blobs.json(call["arguments_ref"]).get("argv")) == "validation_attempt"):
+                excerpt = store.blobs.read(result["output_ref"])[-1600:].decode("utf-8", errors="replace")
             results.append({"sequence": event.run_seq, "tool": call["name"],
                             "arguments": store.blobs.json(call["arguments_ref"]),
                             "status": status, "exit_code": result["exit_code"],
-                            "output_ref": result["output_ref"]})
+                            "output_ref": result["output_ref"], "failure_excerpt": excerpt})
         elif event.event_type in {"tool.rejected", "tool.skipped"}:
             results.append({"sequence": event.run_seq, "tool": call["name"],
                             "arguments": store.blobs.json(call["arguments_ref"]),
@@ -184,12 +189,22 @@ class RepairProgress:
                     self.milestone("investigation" if item["status"] == "succeeded" else "blocked")
             if kind == "validation_attempt":
                 key = digest(canonical({"argv": args.get("argv"), "cwd": args.get("cwd", "project"),
-                                        "files": files, "exit_code": item["exit_code"]}))
+                                        "files": files}))
                 check = {"argv": [str(arg)[:256] for arg in args.get("argv", [])[:12]],
                          "cwd": args.get("cwd", "project"),
                          "status": item["status"], "exit_code": item["exit_code"],
                          "output_ref": item["output_ref"], "independent": False}
                 state["checks"] = [*state["checks"], check][-8:]
+                # Keep failures visible when other suites pass or context is
+                # trimmed. Only a passing rerun of this command resolves it.
+                pending = state.setdefault("unresolved_checks", [])
+                identity = {"argv": args.get("argv"), "cwd": args.get("cwd", "project")}
+                check_key = digest(canonical(identity))
+                pending = [c for c in pending if c["check_key"] != check_key]
+                if item["exit_code"] != 0:
+                    pending.append({**check, "check_key": check_key,
+                                    "failure_excerpt": item.get("failure_excerpt")})
+                state["unresolved_checks"] = pending[-16:]
                 if key not in state["seen_checks"] and item["exit_code"] is not None:
                     state["seen_checks"] = [*state["seen_checks"], key][-128:]
                     self.milestone("validation" if item["exit_code"] == 0 else "reproduction")
@@ -214,6 +229,7 @@ class RepairProgress:
             else:
                 state["recoveries"] += 1
                 state["decision"] = "recover"
+                state["warning"] = "Final recovery allowance before stopping stalled work." if state["recoveries"] == self.policy.max_recoveries else ""
         return state["decision"]
 
     def milestone(self, stage):
@@ -228,9 +244,12 @@ class RepairProgress:
                               "acceptance": [v[:200] for v in item["acceptance"][:4]]}
                              for item in value["findings"]]
         value["reads"] = value["reads"][-16:]
+        value["unresolved_checks"] = value.get("unresolved_checks", [])[-4:]
         while len(canonical(value)) > 14000:
             if value["checks"]:
                 value["checks"] = value["checks"][1:]
+            elif len(value["unresolved_checks"]) > 1:
+                value["unresolved_checks"] = value["unresolved_checks"][1:]
             elif value["reads"]:
                 value["reads"] = value["reads"][1:]
             elif value["changed_paths"]:

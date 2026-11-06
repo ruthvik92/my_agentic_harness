@@ -4,9 +4,12 @@ This document describes the agent configuration files in `config/`. Each YAML fi
 
 ## Current profiles
 
+These values describe the files currently in `config/`. Profile edits and model
+overrides affect future submissions; saved jobs retain their frozen `config.json`.
+
 | File | Agent ID | Provider | Model | Instructions | Tools | Window | Reserve | Notes |
 |------|----------|----------|-------|--------------|-------|--------|---------|-------|
-| `coder.yaml` | `coder` | `ollama` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v3` | 11 | 131072 | 32768 | Local Ollama coding agent |
+| `coder.yaml` | `coder` | `ollama` | `qwen3:30b-a3b-instruct-2507-q8_0` | `coder-v3` | 11 | 262144 | 65536 | Local Ollama coding agent |
 | `analog.yaml` | `analog` | `ollama` | `qwen3.8:27b` | `analog-v2` | 11 | 65536 | 16384 | Local Ollama PDF circuit analysis |
 | `browser.yaml` | `browser` | `ollama` | `qwen3.8:27b` | `browser-v1` | 0 | 32768 | 4096 | Default browser and screenshot chat |
 
@@ -76,6 +79,7 @@ Changing a configuration affects future runs only. Each completed trace captures
 
 ## Related documentation
 
+- [Review context, data sharing, and effective reviewer budgets](reviews.md)
 - [Browser interface](browser.md)
 - [MCP interfaces](mcp.md)
 

@@ -29,6 +29,8 @@ _ALLOWED_FIELDS = frozenset(
         "region",
         "context_page",
         "execution_mode",
+        "run_limit_minutes",
+        "n_last_chats",
     }
 )
 
@@ -115,9 +117,15 @@ def _gather_source_run_ids(messages: list) -> list:
 def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task_context=None,
                         config_override=None, force_tests=False, extra_metadata=None):
     """Submit an ``answer`` turn for the selected profile on a thread."""
+    from local_agent.mobile.task_context import DEFAULT_N_LAST_CHATS, validate_n_last_chats
+
     payload = _validate_payload(payload)
+    n_last_chats = validate_n_last_chats(payload.get("n_last_chats", DEFAULT_N_LAST_CHATS))
     name = _resolve_profile_name(payload, server)
     cfg = config_override or server.profiles.load(name)
+    from local_agent.mobile.run_limits import override
+
+    cfg = override(cfg, payload.get("run_limit_minutes"))
 
     with server.threads._lock:
         if hasattr(server, "loops"):
@@ -130,6 +138,9 @@ def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task
             status = pending.get("status")
             if status in ("queued", "running"):
                 _reject("thread has a pending job in status %r" % status)
+        from local_agent.mobile.task_context import ensure_previous_terminal
+
+        ensure_previous_terminal(server, payload.get("continue_workspace_id"))
         history = server.threads.history(thread_id)
         if len(thread["messages"]) >= _MAX_MESSAGES:
             _reject("thread has reached the maximum message count")
@@ -169,7 +180,9 @@ def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task
         if request.get("continue_workspace_id") and repair_context is None:
             from local_agent.mobile.task_context import attach, capture
 
-            task_context = task_context or capture(server, thread_id, request["continue_workspace_id"])
+            task_context = task_context or capture(
+                server, thread_id, request["continue_workspace_id"], n_last_chats
+            )
             if task_context is not None:
                 request = attach(request, task_context)
         if repair_context is not None:
@@ -200,6 +213,9 @@ def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task
             "source_run_ids": source_run_ids,
             "usage_baseline_model": server.usage_baseline(),
             "profile_name": name,
+            "run_timeout_seconds": cfg.limits.run_timeout_seconds,
+            "n_last_chats": n_last_chats,
+            "task_context": task_context,
             "config_hash": digest(canonical(cfg.model_dump(mode="json"))),
             "mode": request["mode"],
             "tools": list(cfg.tools),
@@ -215,11 +231,13 @@ def submit_profile_turn(server, thread_id, payload, *, repair_context=None, task
             metadata["repair_review_job_id"] = repair_context["review_job_id"]
             metadata["repair_original_task"] = repair_context["evidence"]["original_task"]
             metadata["question"] = "Fix the findings from this workspace review and rerun the tests."
+            if repair_context["evidence"].get("additional_context"):
+                metadata["question"] += "\n\nAdditional repair context:\n" + repair_context["evidence"]["additional_context"]
             metadata["source_run_ids"] = list(dict.fromkeys(
                 [*repair_context["source_run_ids"], *source_run_ids]
             ))
         if extra_metadata:
-            if set(extra_metadata) - {"loop_id", "loop_stage"}:
+            if set(extra_metadata) - {"loop_id", "loop_stage", "loop_deadline"}:
                 raise ValueError("Unknown controller job metadata")
             metadata.update(extra_metadata)
             metadata["question"] = "Local loop iteration: repair findings and rerun checks."

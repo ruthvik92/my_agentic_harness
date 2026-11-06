@@ -1,3 +1,4 @@
+import json
 import math
 
 from local_agent.contracts import ContextSnapshot
@@ -58,8 +59,62 @@ class ContextBuilder:
             tool for tool in definitions() if tool["function"]["name"] in self.config.tools
         )
 
+        def inspection_key(group):
+            """Identify identical successful reads, never tests or mutations."""
+            if len(group) != 2 or group[0].get("role") != "assistant" or group[1].get("role") != "tool":
+                return None
+            calls = group[0].get("tool_calls", [])
+            if len(calls) != 1:
+                return None
+            function = calls[0].get("function", {})
+            name, args = function.get("name"), function.get("arguments", {})
+            try:
+                if isinstance(args, str):
+                    args = json.loads(args)
+                if name == "run_command":
+                    argv = args.get("argv", [])
+                    if len(argv) < 2 or argv[0] != "git" or argv[1] not in {"diff", "log", "show", "status"}:
+                        return None
+                elif name not in {"read_file", "list_files", "search_files", "git_diff"}:
+                    return None
+                result = json.loads(group[1].get("content", ""))
+                if result.get("status") != "succeeded" or result.get("exit_code") not in {None, 0}:
+                    return None
+                return canonical([name, args, {k: result.get(k) for k in
+                    ("evidence_ref", "preview", "error", "truncated")}])
+            except (ValueError, TypeError, AttributeError):
+                return None
+
+        # Retain the newest complete exchange and all original evidence. Repeated
+        # successful reads must not crowd out the failure the agent needs to fix.
+        compact_groups, repeated, inspections = [], [], {}
+        trailing_repeats = 0
+        for group in groups:
+            key = inspection_key(group)
+            trailing_repeats = 0
+            if key is None:
+                # A command, edit, or other exchange can change what a read
+                # means. Never coalesce across that boundary.
+                inspections.clear()
+            elif key in inspections:
+                old_index, count = inspections[key]
+                repeated.append({"source_ref": self.blobs.put_json(compact_groups[old_index]),
+                                 "reason": "repeated_inspection"})
+                compact_groups[old_index] = None
+                trailing_repeats = count
+            if key is not None:
+                inspections[key] = (len(compact_groups), trailing_repeats + 1)
+            compact_groups.append(group)
+        compact_groups = [group for group in compact_groups if group is not None]
+
         def payload(chosen, note=None):
             messages = [*fixed, *([note] if note else []), *[m for group in chosen for m in group]]
+            if trailing_repeats >= 2:
+                messages.append({"role": "system", "content":
+                    "Controller observation: the same successful inspection returned identical "
+                    f"evidence {trailing_repeats + 1} times without intervening work. Repeating it provides no new "
+                    "information. Use the retained result, address the unresolved failing check, "
+                    "make a targeted change, or report a concrete blocker."})
             if self.config.provider == "openai":
                 from local_agent.models.openai import wire_messages
                 from local_agent.models.responses import payload as responses_payload
@@ -108,8 +163,8 @@ class ContextBuilder:
         if not fits(payload([])):
             raise ValueError("fixed instructions and schemas exceed the input context budget")
         chosen = []
-        excluded = []
-        for index, group in enumerate(reversed(groups)):
+        excluded = list(repeated)
+        for index, group in enumerate(reversed(compact_groups)):
             candidate = [group, *chosen]
             if fits(payload(candidate)):
                 chosen = candidate

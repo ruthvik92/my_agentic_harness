@@ -14,7 +14,13 @@ from local_agent.mobile.profile_turns import submit_profile_turn
 from local_agent.mobile.repair_controls import repair_evidence
 from local_agent.mobile.review_controls import submit_workspace_review
 from local_agent.mobile.review_gates import eligible, evidence_key
-from local_agent.mobile.task_context import capture
+from local_agent.mobile.task_context import (
+    DEFAULT_N_LAST_CHATS,
+    capture,
+    ensure_previous_terminal,
+    unresolved_checks,
+    validate_n_last_chats,
+)
 from local_agent.mobile.workspace_sessions import view
 from local_agent.storage.blobs import canonical, digest, private_directory
 from local_agent.workspace.git import GitWorktrees
@@ -62,6 +68,8 @@ class Loops:
 
     def save(self, state):
         state["updated"] = time.time()
+        if state["status"] != "running":
+            state.setdefault("ended", state["updated"])
         publish(self.directory / state["loop_id"] / "state.json", state)
 
     def activity(self, state, kind):
@@ -95,12 +103,19 @@ class Loops:
         from local_agent.mobile.tokens import summary
 
         for state in result:
+            now = min(time.time(), state.get("ended", time.time()))
+            state["elapsed_seconds"] = max(0, now - state["created"])
+            state["remaining_seconds"] = (
+                max(0, state["deadline"] - now) if state["status"] == "running" else 0
+            )
             state["live_usage"] = summary(
                 [j for j in jobs if j.get("loop_id") == state["loop_id"]]
             )["totals"]
             current = next((j for j in jobs if j["job_id"] == state.get("active_job_id")), {})
             state["current_run_id"] = current.get("run_id")
             state["current_job_status"] = current.get("status")
+            state["current_phase"] = current.get("phase")
+            state["live_recovery"] = current.get("live_recovery")
         return result
 
     def active(self, *, thread_id=None, workspace_id=None):
@@ -115,12 +130,31 @@ class Loops:
 
     def start(self, thread_id, payload):
         required = {"workspace_id", "profile_name", "authorize_paid"}
-        allowed = required | set(DEFAULTS) | {"model_id", "reviewer_model_id", "execution_mode"}
+        allowed = (
+            required
+            | set(DEFAULTS)
+            | {"model_id", "reviewer_model_id", "execution_mode", "mode", "run_limit_minutes", "n_last_chats"}
+        )
         if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
             raise ValueError(
                 "Choose a workspace, local coding profile and explicit paid-review authorization"
             )
-        limits = {key: payload.get(key, value) for key, value in DEFAULTS.items()}
+        n_last_chats = validate_n_last_chats(payload.get("n_last_chats", DEFAULT_N_LAST_CHATS))
+        mode = payload.get("mode", "approval")
+        if mode not in {"completion", "approval"}:
+            raise ValueError("Loop mode must be completion or approval")
+        if mode == "completion" and (
+            payload.get("authorize_paid") is not False
+            or payload.get("max_paid_reviews", 0) != 0
+            or payload.get("reviewer_model_id")
+        ):
+            raise ValueError("Completion loops are local-only, including diagnosis")
+        limits = {
+            key: payload.get(
+                key, 0 if mode == "completion" and key == "max_paid_reviews" else value
+            )
+            for key, value in DEFAULTS.items()
+        }
         if any(
             type(value) is not int or not BOUNDS[key][0] <= value <= BOUNDS[key][1]
             for key, value in limits.items()
@@ -147,7 +181,11 @@ class Loops:
             )
             if not workspace:
                 raise ValueError("Choose a workspace belonging to this chat")
+            ensure_previous_terminal(self.server, payload["workspace_id"])
             cfg = self.server.profiles.load(payload["profile_name"])
+            from local_agent.mobile.run_limits import override
+
+            cfg = override(cfg, payload.get("run_limit_minutes"))
             if (
                 cfg.provider != "ollama"
                 or not cfg.instructions_version.startswith("coder-")
@@ -189,6 +227,9 @@ class Loops:
             now = time.time()
             state = {
                 "loop_id": loop_id,
+                "mode": payload.get("mode", "approval"),
+                "run_timeout_seconds": cfg.limits.run_timeout_seconds,
+                "n_last_chats": n_last_chats,
                 "thread_id": thread_id,
                 "workspace_id": payload["workspace_id"],
                 "profile_name": payload["profile_name"],
@@ -239,11 +280,21 @@ class Loops:
 
                     reviewed = latest["workspace_review"].get("target") or {}
                     record = GitWorktrees(Workspaces(self.server.root)).load(state["workspace_id"])
-                    if reviewed.get("candidate_commit") and record:
-                        tree = command(record, "rev-parse", reviewed["candidate_commit"] + "^{tree}").decode().strip()
-                        state["review_receipts"] = [evidence_key(
-                            tree, latest["workspace_review"].get("project_tests") or {}
-                        )]
+                    if (
+                        reviewed.get("candidate_commit")
+                        and record
+                        and state["mode"] != "completion"
+                    ):
+                        tree = (
+                            command(record, "rev-parse", reviewed["candidate_commit"] + "^{tree}")
+                            .decode()
+                            .strip()
+                        )
+                        state["review_receipts"] = [
+                            evidence_key(
+                                tree, latest["workspace_review"].get("project_tests") or {}
+                            )
+                        ]
                     self.save(state)
                 self.activity(state, "workspace.loop_started")
                 self.queue_local(state)
@@ -255,7 +306,8 @@ class Loops:
 
     def paid_allowed(self, state):
         return (
-            state.get("paid_authorized", False)
+            state.get("mode", "approval") != "completion"
+            and state.get("paid_authorized", False)
             and not state["paid_disabled"]
             and state["paid_attempts"] < state["limits"]["max_paid_reviews"]
             and state["paid_tokens"] < state["limits"]["paid_token_budget"]
@@ -264,11 +316,14 @@ class Loops:
     def within_limits(self, state, *, local=False):
         if time.time() >= state["deadline"]:
             state.update(
-                status="time_limit",
+                status="budget_exhausted" if state.get("mode") == "completion" else "time_limit",
                 reason="Scheduling time limit reached; no further stage started",
             )
         elif local and state["local_attempts"] >= state["limits"]["max_local_cycles"]:
-            state.update(status="cycle_limit", reason="Local iteration limit reached")
+            state.update(
+                status="budget_exhausted" if state.get("mode") == "completion" else "cycle_limit",
+                reason="Local iteration limit reached",
+            )
         if state["status"] != "running":
             state["active_job_id"] = None
             self.save(state)
@@ -278,10 +333,17 @@ class Loops:
     def queue_local(self, state):
         if not self.within_limits(state, local=True):
             return
-        context = capture(self.server, state["thread_id"], state["workspace_id"])
+        context = capture(self.server, state["thread_id"], state["workspace_id"],
+                          state.get("n_last_chats", DEFAULT_N_LAST_CHATS))
         if context is None:
             raise ValueError("Loop workspace is no longer available")
         context["latest_review"] = state["last_review"]
+        context["unresolved_checks"] = state.get("unresolved_checks", context["unresolved_checks"])
+        context["recovery_plan"] = state.get(
+            "recovery_plan",
+            "Inspect the latest failure, make a targeted repair or prepare dependencies, then rerun the unresolved checks.",
+        )
+        context["possible_nondeterminism"] = state.get("possible_nondeterminism", False)
         context["paid_reviews_remaining"] = (
             max(0, state["limits"]["max_paid_reviews"] - state["paid_attempts"])
             if self.paid_allowed(state)
@@ -295,20 +357,35 @@ class Loops:
                         "run_timeout_seconds": max(
                             1,
                             min(
-                                cfg.limits.run_timeout_seconds, int(state["deadline"] - time.time())
+                                cfg.limits.run_timeout_seconds,
+                                state.get("run_timeout_seconds", cfg.limits.run_timeout_seconds),
+                                int(state["deadline"] - time.time()),
                             ),
                         )
                     }
                 )
             }
         )
+        if not state["local_attempts"]:
+            record = GitWorktrees(Workspaces(self.server.root)).load(state["workspace_id"])
+            self.measure_changes(state, record or {})
         state.update(stage="local", local_attempts=state["local_attempts"] + 1, active_job_id=None)
+        state["warning"] = (
+            "Final local attempt: the loop will stop if completion criteria are still unmet."
+            if state["local_attempts"] >= state["limits"]["max_local_cycles"]
+            else ""
+        )
+        if state.get("unchanged_count", 0) >= 1:
+            state["warning"] = (
+                "Final unchanged attempt: further failure without file or environment progress will stop the loop."
+            )
         self.save(state)
         job_id = submit_profile_turn(
             self.server,
             state["thread_id"],
             {
                 "profile_name": state["profile_name"],
+                "n_last_chats": state.get("n_last_chats", DEFAULT_N_LAST_CHATS),
                 "workspace": state["repository"],
                 "continue_workspace_id": state["workspace_id"],
                 "working_directory": state["working_directory"],
@@ -322,7 +399,11 @@ class Loops:
             task_context=context,
             config_override=cfg,
             force_tests=True,
-            extra_metadata={"loop_id": state["loop_id"], "loop_stage": "local"},
+            extra_metadata={
+                "loop_id": state["loop_id"],
+                "loop_stage": "local",
+                "loop_deadline": state["deadline"],
+            },
         )
         state["active_job_id"] = job_id
         self.save(state)
@@ -331,9 +412,14 @@ class Loops:
         """One advisory rescue per loop, charged to the existing paid allowance."""
         if not self.within_limits(state) or not self.paid_allowed(state):
             return
-        context = capture(self.server, state["thread_id"], state["workspace_id"])
-        evidence = canonical({"original_task": (context or {}).get("original_task"),
-                              "attempts": (context or {}).get("attempts", [])[:2]}).decode()[:6000]
+        context = capture(self.server, state["thread_id"], state["workspace_id"],
+                          state.get("n_last_chats", DEFAULT_N_LAST_CHATS))
+        evidence = canonical(
+            {
+                "original_task": (context or {}).get("original_task"),
+                "attempts": (context or {}).get("attempts", [])[-2:],
+            }
+        ).decode()[:6000]
         question = (
             "Diagnose repeated local coding-agent/tool failures from the supplied controller evidence. "
             "Give a short concrete recovery plan with valid tool arguments and small edits. "
@@ -344,23 +430,50 @@ class Loops:
         )
         cfg = load_config(self.directory / state["loop_id"] / "reviewer.json")
         allowance = state["limits"]["paid_token_budget"] - state["paid_tokens"]
-        cfg = cfg.model_copy(update={
-            "instructions_version": "phone-v1", "tools": (),
-            "instructions_hash": digest(instruction_text("phone-v1").encode()),
-            "project_tests": False,
-            "output_reserve_tokens": min(cfg.output_reserve_tokens, 4096),
-            "paid_token_limit": min(allowance, cfg.paid_token_limit or allowance),
-            "limits": cfg.limits.model_copy(update={"max_model_turns": 1,
-                "run_timeout_seconds": max(1, min(300, int(state["deadline"] - time.time())))})})
-        state.update(stage="diagnostic", paid_attempts=state["paid_attempts"] + 1,
-                     diagnostic_attempts=state.get("diagnostic_attempts", 0) + 1, active_job_id=None)
+        cfg = cfg.model_copy(
+            update={
+                "instructions_version": "phone-v1",
+                "tools": (),
+                "instructions_hash": digest(instruction_text("phone-v1").encode()),
+                "project_tests": False,
+                "output_reserve_tokens": min(cfg.output_reserve_tokens, 4096),
+                "paid_token_limit": min(allowance, cfg.paid_token_limit or allowance),
+                "limits": cfg.limits.model_copy(
+                    update={
+                        "max_model_turns": 1,
+                        "run_timeout_seconds": max(
+                            1,
+                            min(
+                                300,
+                                state.get("run_timeout_seconds", 300),
+                                int(state["deadline"] - time.time()),
+                            ),
+                        ),
+                    }
+                ),
+            }
+        )
+        state.update(
+            stage="diagnostic",
+            paid_attempts=state["paid_attempts"] + 1,
+            diagnostic_attempts=state.get("diagnostic_attempts", 0) + 1,
+            active_job_id=None,
+        )
         self.save(state)  # reserve before enqueue, never refund/replay after a crash
         job_id = self.server.jobs.submit(
-            {"mode": "chat", "question": question, "history": []}, config=cfg,
-            metadata={"thread_id": state["thread_id"], "kind": "review", "mode": "chat",
+            {"mode": "chat", "question": question, "history": []},
+            config=cfg,
+            metadata={
+                "thread_id": state["thread_id"],
+                "kind": "review",
+                "mode": "chat",
                 "question": "Advisory diagnosis of repeated local failures (not code approval)",
-                "loop_id": state["loop_id"], "loop_stage": "diagnostic",
-                "source_run_ids": [h["run_id"] for h in state["history"][-2:] if h.get("run_id")]})
+                "loop_id": state["loop_id"],
+                "loop_stage": "diagnostic",
+                "loop_deadline": state["deadline"],
+                "source_run_ids": [h["run_id"] for h in state["history"][-2:] if h.get("run_id")],
+            },
+        )
         state["active_job_id"] = job_id
         self.server.threads.update(state["thread_id"], pending_job=job_id)
         self.save(state)
@@ -369,9 +482,12 @@ class Loops:
         if not self.within_limits(state):
             return
         if not self.paid_allowed(state):
-            state.update(status="review_blocked", reason="Paid review is not authorized or its budget is unavailable",
-                         review_eligibility={"eligible": False, "reason": "Paid allowance unavailable"},
-                         active_job_id=None)
+            state.update(
+                status="review_blocked",
+                reason="Paid review is not authorized or its budget is unavailable",
+                review_eligibility={"eligible": False, "reason": "Paid allowance unavailable"},
+                active_job_id=None,
+            )
             self.save(state)
             return
         record = GitWorktrees(Workspaces(self.server.root)).load(state["workspace_id"])
@@ -391,7 +507,9 @@ class Loops:
                         "run_timeout_seconds": max(
                             1,
                             min(
-                                cfg.limits.run_timeout_seconds, int(state["deadline"] - time.time())
+                                cfg.limits.run_timeout_seconds,
+                                state.get("run_timeout_seconds", cfg.limits.run_timeout_seconds),
+                                int(state["deadline"] - time.time()),
                             ),
                         )
                     }
@@ -419,7 +537,11 @@ class Loops:
                 "working_directory": state["working_directory"],
             },
             config_override=cfg,
-            extra_metadata={"loop_id": state["loop_id"], "loop_stage": "review"},
+            extra_metadata={
+                "loop_id": state["loop_id"],
+                "loop_stage": "review",
+                "loop_deadline": state["deadline"],
+            },
         )
         state["active_job_id"] = job_id
         self.save(state)
@@ -448,6 +570,13 @@ class Loops:
                 }
             )
             state["active_job_id"] = None
+            progress = job.get("repair_progress") or {}
+            state["recovery_status"] = progress.get(
+                "decision",
+                "Inspect unresolved checks"
+                if job.get("status") != "completed"
+                else "Controller checks recorded",
+            )
             self.save(state)
             if state["status"] != "running":
                 return
@@ -456,6 +585,23 @@ class Loops:
             except Exception as exc:
                 state.update(status="blocked", reason=str(exc), active_job_id=None)
                 self.save(state)
+
+    def measure_changes(self, state, record):
+        """Compare real worktree contents, including unpublished edits after failed runs."""
+        from local_agent.runtime.repair_progress import source_state
+
+        path = self.directory / state["loop_id"] / "files.json"
+        try:
+            files = source_state(record["worktree"])
+            before = json.loads(path.read_text()) if path.exists() else files
+            state["changed_paths"] = sorted(
+                name for name in before.keys() | files.keys() if before.get(name) != files.get(name)
+            )[:48]
+            publish(path, files)
+            return digest(canonical(files))
+        except (OSError, ValueError, KeyError):
+            state["changed_paths"] = []
+            return None
 
     def advance(self, state, job, totals):
         if not self.within_limits(state):
@@ -470,7 +616,16 @@ class Loops:
 
             store = Store(self.server.root, readonly=True)
             try:
-                if store.run(job["run_id"])["status"] not in TERMINAL:
+                run = store.db.execute("SELECT status FROM runs WHERE id=?", (job["run_id"],)).fetchone()
+                if run is None:
+                    state.update(
+                        status="blocked",
+                        reason="Attempt failed before a durable run was created: "
+                        + str(job.get("error") or "No run evidence is available"),
+                    )
+                    self.save(state)
+                    return
+                if run["status"] not in TERMINAL or run["status"] == "needs_reconciliation":
                     state.update(
                         status="blocked",
                         reason="Interrupted attempt requires reconciliation; inspect its trace before continuing",
@@ -479,12 +634,25 @@ class Loops:
                     return
             finally:
                 store.close()
+        if state.get("mode") == "completion" and job["loop_stage"] != "local":
+            state.update(
+                status="blocked", reason="Completion loops cannot enter review or paid diagnosis"
+            )
+            self.save(state)
+            return
         if job["loop_stage"] == "diagnostic":
-            state["last_review"] = {"kind": "advisory_diagnosis", "verified": False,
-                                    "summary": (job.get("answer") or job.get("error") or "No diagnosis returned")[:6000]}
+            state["last_review"] = {
+                "kind": "advisory_diagnosis",
+                "verified": False,
+                "summary": (job.get("answer") or job.get("error") or "No diagnosis returned")[
+                    :6000
+                ],
+            }
             if job["status"] != "completed" or totals.get("unknown_openai_requests"):
                 state["paid_disabled"] = True
-                state["reason"] = "Diagnostic outcome or paid usage uncertain; further paid calls disabled"
+                state["reason"] = (
+                    "Diagnostic outcome or paid usage uncertain; further paid calls disabled"
+                )
             self.save(state)
             self.queue_local(state)
             return
@@ -525,9 +693,31 @@ class Loops:
             self.save(state)
             self.queue_local(state)
             return
-        if ((job.get("repair_progress") or {}).get("decision") == "local_stalled"
-                and (job.get("repair_progress") or {}).get("mode") == "enforce"):
-            state.update(status="local_stalled", reason="Local repair exhausted its recovery allowance; work preserved and paid review blocked")
+        if job.get("status") in {"interrupted", "cancelled"}:
+            state.update(
+                status="interrupted",
+                reason="Attempt interrupted; work preserved, no stage replayed",
+            )
+            self.save(state)
+            return
+        if state.get("mode") == "completion":
+            record = GitWorktrees(Workspaces(self.server.root)).load(state["workspace_id"])
+            complete, reason, _ = eligible(job, record, [])
+            if complete:
+                state.update(
+                    status="complete", reason="Complete — checks passed; not reviewer-approved."
+                )
+                self.save(state)
+                return
+            state["completion_blocker"] = reason
+        state["unresolved_checks"] = unresolved_checks(job)
+        if (job.get("repair_progress") or {}).get("decision") == "local_stalled" and (
+            job.get("repair_progress") or {}
+        ).get("mode") == "enforce":
+            state.update(
+                status="stalled" if state.get("mode") == "completion" else "local_stalled",
+                reason="Local repair exhausted its recovery allowance; work preserved and paid review blocked",
+            )
             self.save(state)
             return
         passed = (
@@ -535,7 +725,7 @@ class Loops:
             and job.get("audit", {}).get("ok")
             and (job.get("project_tests") or {}).get("status") == "passed"
         )
-        if passed and not self.paid_allowed(state):
+        if passed and not self.paid_allowed(state) and state.get("mode") != "completion":
             state.update(
                 status="tests_passed_unverified",
                 reason="Tests passed; latest changes are not verifier-approved",
@@ -544,12 +734,59 @@ class Loops:
             return
         git = job.get("git_workspace") or {}
         record = GitWorktrees(Workspaces(self.server.root)).load(state["workspace_id"])
+        tests = job.get("project_tests") or {}
+        failure = digest(
+            canonical(
+                {
+                    "checks": state["unresolved_checks"],
+                    "status": tests.get("status"),
+                    "error": job.get("error"),
+                }
+            )
+        )
+        files = self.measure_changes(state, record or {})
+        environment = tests.get("environment") or {}
+        tree = (
+            digest(
+                canonical(
+                    {
+                        "candidate": (record or {}).get("candidate_tree"),
+                        "files": files,
+                        "environment": {k: environment.get(k) for k in ("image", "key")},
+                    }
+                )
+            )
+            if files or (record or {}).get("candidate_tree")
+            else None
+        )
+        state["possible_nondeterminism"] = bool(
+            tree
+            and tree == state.get("previous_tree")
+            and state.get("previous_failure")
+            and failure != state["previous_failure"]
+        )
+        state["changes_since_previous"] = (
+            "Candidate content unchanged"
+            if tree and tree == state.get("previous_tree")
+            else "Candidate content changed"
+            if tree
+            else "Candidate content unavailable"
+        )
+        state["previous_tree"], state["previous_failure"] = tree, failure
+        state["recovery_plan"] = (
+            (
+                "Varying failures without source edits: check seeds, timing and environment for possible nondeterminism. "
+                if state["possible_nondeterminism"]
+                else ""
+            )
+            + "Read failing assertions and paths; prepare missing dependencies in Docker, make a targeted repair, then rerun unresolved checks."
+        )
         signature = digest(
             canonical(
                 {
                     "tree": (record or {}).get("candidate_tree"),
-                    "tests": (job.get("project_tests") or {}).get("status"),
-                    "error": job.get("error"),
+                    "tests_passed": (job.get("project_tests") or {}).get("status") == "passed",
+                    "error": job.get("error") if tree is None else None,
                 }
             )
         )
@@ -558,9 +795,13 @@ class Loops:
         )
         state["last_signature"] = signature
         recent = [h for h in state["history"] if h["stage"] == "local"][-2:]
-        if (len(recent) == 2 and all(h["status"] == "failed" for h in recent)
-                and state["local_attempts"] < state["limits"]["max_local_cycles"]
-                and not state.get("diagnostic_attempts") and self.paid_allowed(state)):
+        if (
+            len(recent) == 2
+            and all(h["status"] == "failed" for h in recent)
+            and state["local_attempts"] < state["limits"]["max_local_cycles"]
+            and not state.get("diagnostic_attempts")
+            and self.paid_allowed(state)
+        ):
             self.save(state)
             self.queue_diagnosis(state)
             return
@@ -572,11 +813,7 @@ class Loops:
             self.save(state)
             return
         self.save(state)
-        if (
-            self.paid_allowed(state)
-            and passed
-            and git.get("candidate_commit")
-        ):
+        if self.paid_allowed(state) and passed and git.get("candidate_commit"):
             self.queue_review(state, job)
         else:
             self.queue_local(state)
@@ -586,7 +823,7 @@ class Loops:
             state = self.load(loop_id, thread_id)
             if state["status"] == "running":
                 state.update(
-                    status="stopped",
+                    status="interrupted" if state.get("mode") == "completion" else "stopped",
                     reason="Stopped by owner; current bounded stage may finish, no next stage will start",
                 )
                 self.save(state)

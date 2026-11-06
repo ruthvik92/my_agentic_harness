@@ -77,6 +77,9 @@ and no-automatic-replay rules remain in effect. Approval never merges automatica
 
 ## Paid output and findings
 
+The canonical input/context and token-accounting reference is [reviews](reviews.md).
+This section describes the repair feedback contract.
+
 New reviews return up to eight findings containing `id`, `location`, `observed`,
 `expected`, `impact` and `acceptance`, with a short summary and executed test
 commands. The reviewer describes required behavior rather than supplying patches.

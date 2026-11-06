@@ -77,6 +77,17 @@ async function main() {
   node('base-ref').value = 'topic~1'; node('working-directory').value = 'tests/fixtures/broken_repo';
   check(controls.requestFields().base_ref === 'topic~1', 'new task must submit selected revision');
   check(controls.requestFields().working_directory === 'tests/fixtures/broken_repo', 'must submit working directory');
+  check(controls.requestFields().n_last_chats === 8, 'blank history uses default eight');
+  node('n-last-chats').value = '3';
+  check(controls.requestFields().n_last_chats === 3, 'history choice must enter request');
+  for (const value of ['0', '101', '1.5', 'invalid']) {
+    node('n-last-chats').value = value;
+    let rejected = false;
+    try { controls.requestFields(); } catch (_) { rejected = true; }
+    check(rejected, 'invalid history count must be rejected');
+  }
+  node('n-last-chats').value = '1';
+  check(controls.requestFields().n_last_chats === 1, 'first-only history is supported');
   node('task-mode').value = 'continue'; node('task-mode').handlers.change();
   check(node('new-task-fields').hidden && !node('continue-task-fields').hidden, 'continue must show previous ID instead of revision');
   node('continue-workspace').value = 'ws_' + 'a'.repeat(32);
@@ -87,6 +98,7 @@ async function main() {
   node('execution-mode').value = 'persistent';
   check(controls.requestFields().execution_mode === 'persistent', 'persistent choice must enter the submitted request');
   controls.busy(true); check(node('execution-mode').disabled, 'busy mode must disable execution choice');
+  check(node('n-last-chats').disabled, 'busy mode must disable history choice');
   controls.busy(false); check(!node('execution-mode').disabled, 'idle mode must enable choice');
   node('config-select').value = 'analog.yaml'; node('config-select').handlers.change();
   check(node('legacy-circuit-controls').hidden, 'PDF circuit workflow must not offer screenshot netlist controls');
@@ -98,6 +110,7 @@ async function main() {
   node('pdf-input').value = 'manual.pdf'; node('page-input').value = '1'; node('dpi-input').value = '300';
   check(!('execution_mode' in controls.requestFields()), 'profile persistent default must remain implicit');
   check(!('working_directory' in controls.requestFields()), 'stale coding options must not leak into circuit requests');
+  check(!('n_last_chats' in controls.requestFields()), 'coding history must not leak into circuit requests');
   node('config-select').value = 'browser.yaml'; node('config-select').handlers.change();
   check(!node('legacy-circuit-controls').hidden, 'screenshot chat keeps its legacy optional actions');
   check(node('execution-fields').hidden, 'no-tools chat must hide execution choice');

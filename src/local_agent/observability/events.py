@@ -23,6 +23,7 @@ EventType = Literal[
     "workspace.loop_started",
     "workspace.loop_stopped",
     "project.tests",
+    "project.checks_started",
     "repair.progress",
     "environment.command_started",
     "environment.command_finished",

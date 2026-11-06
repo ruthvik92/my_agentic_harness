@@ -1,6 +1,8 @@
 """Independent checks shared by coding completion and workspace review."""
 
+import asyncio
 import json
+import time
 from pathlib import Path
 
 from local_agent.models.scripted import ScriptedProvider
@@ -31,7 +33,7 @@ def changed_files(project, baseline):
     )
 
 
-async def run_checks(store, config, project, plan, sandbox, *, locked=False):
+async def run_checks(store, config, project, plan, sandbox, *, locked=False, deadline=None):
     # Nested checks share the parent's serialized SQLite connection. Opening a second
     # writable Store would close an extra raw database fd and can release POSIX locks.
     # Evidence budgets still belong to individual runs, so restore the parent's budget.
@@ -40,18 +42,22 @@ async def run_checks(store, config, project, plan, sandbox, *, locked=False):
     try:
         # Preparation can fail before Agent.run opens its recording span.
         with spans.boundary("project.checks"):
-            return await _run_checks(store, config, project, plan, sandbox, locked=locked)
+            return await _run_checks(store, config, project, plan, sandbox, locked=locked, deadline=deadline)
     finally:
         store.blobs.budget, store.blobs.budget_refs = budget, refs
         spans.shutdown()
 
 
-async def _run_checks(store, config, project, plan, sandbox, *, locked=False):
+async def _run_checks(store, config, project, plan, sandbox, *, locked=False, deadline=None):
     from local_agent.runtime.agent import Agent
 
     try:
-        prepared = await prepare_environment(store.root, project, plan, sandbox)
+        preparation = prepare_environment(store.root, project, plan, sandbox)
+        prepared = (await asyncio.wait_for(preparation, max(0, deadline - time.monotonic()))
+                    if deadline is not None else await preparation)
     except (RuntimeError, ValueError, OSError) as exc:
+        if isinstance(exc, TimeoutError):
+            exc = RuntimeError("Attempt deadline exhausted during controller-check environment preparation")
         from local_agent.contracts import RunManifest, new_id
         from local_agent.storage.blobs import digest
 
@@ -131,6 +137,8 @@ async def _run_checks(store, config, project, plan, sandbox, *, locked=False):
         ]
     )
     agent = Agent(store, cfg, prepared, provider=script)
+    if deadline is not None:
+        agent.deadline = min(agent.deadline, deadline)
     # A coding parent already holds the data-root lease. The child shares that lease and Store.
     result = (
         await agent._run(project, "Execute the frozen project test plan.")

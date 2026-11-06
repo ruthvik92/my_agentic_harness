@@ -1,4 +1,4 @@
-# Browser Interface User Guide
+# Browser reference
 
 The browser interface is the web front end for the local agent. It is the same
 product as the phone interface, exposed through a standard browser.
@@ -6,6 +6,14 @@ product as the phone interface, exposed through a standard browser.
 For an end-to-end operational walkthrough, including when new worktrees are
 created, which candidate to review, and how previews relate to code versions,
 start with the [functional instruction manual](functional-manual.md).
+
+This page owns browser controls and settings. Use [reviews](reviews.md) for data
+sent to paid models, [configuration](configs.md) for profile fields, and
+[project tests](project-tests.md) for test-plan behavior.
+
+Jump to [startup](#starting-the-server), [review controls](#workspace-review-and-merge),
+[profile editor](#config-editor), [loops and limits](#workspace-sessions-and-bounded-loops),
+or [failure timelines](#reading-an-attempt-timeline).
 
 ## Starting the server
 
@@ -120,6 +128,12 @@ repair feedback and result classifications.
 
 ## Workspace review and merge
 
+On a review with findings, **Fix with local model** opens an optional
+**Additional repair context** field (up to 4,000 characters). **Start local repair**
+submits those instructions alongside the saved findings and check output;
+**Cancel** closes the options without submitting. Repair uses the saved review's
+workspace, worktree and agent branch. Stale review targets are rejected.
+
 For a chat containing a published Git coding result, the main **Review scope**
 defaults to **Workspace — inspect files and run tests**. Leave tests on **auto**:
 the paid reviewer inspects code, README, manifests and test directories, discovers
@@ -139,48 +153,23 @@ use `python -m pytest tests/fixtures/broken_repo/test_text_stats.py -v` from `.`
 to check whether tests work from the project root. The default is `auto`, which resolves the project test contract or Python defaults
 and prepares project imports/dependencies before running checks.
 
-This action is different from **Review conversation**. The controller exports
-the exact candidate commit, runs your configured check in Docker, and gives the
-reviewer a separate copy with file-reading, search, command and diff tools. The
-reviewer receives the captured diff, check output, exit status and original task.
-It reports exact executed test commands. The controller matches them against
-successful captured tool executions and repeats them in a fresh candidate copy
-before approval. The report shows commands, directories, results and output.
-Existing required checks remain required: discovery cannot hide a failed contract
-or override. No automatic plan does not block inspection. Automatic review can
-inspect an environment blocker and explain it, but the blocker prevents approval.
-Explicit override setup failures stop before paid inspection. Missing execution
-evidence or no tests found leaves the candidate unverified.
-Review progress (read pages and command results) is retained across context
-trimming so the reviewer can continue without rediscovering completed work.
-Two rounds of repeated work without new evidence switch the reviewer to its
-report. A final report turn and completion tool capacity are also reserved near
-the configured limits. This uses the existing review budget; it does not start
-another paid review or increase the tool-call allowance. Unresolved questions
-must be reported as limitations or requested changes.
-Neither copy contains the host source checkout or its Git control directory.
-Official OpenAI workspace tool reviews use the Responses API, including stateless
-replay of reasoning and function-call results. GPT-6 tool-enabled official API
-profiles use the same transport; conversation-only and local compatible profiles
-retain Chat Completions. The selected model and reasoning effort are preserved.
+For what is sent to the paid model, character/token limits, tool inspection,
+and conversation-only versus workspace review, use [reviews and data sharing](reviews.md).
+For candidate identity and the review/repair/merge sequence, use the
+[user manual](functional-manual.md#review-a-candidate-with-a-paid-model).
 
-Tools run offline with the existing sandbox dependencies. Missing dependencies,
-timeouts and failing commands are reported; they do not count as passing checks.
+The controller matches the reviewer's selected tests to captured executions and
+repeats them in a fresh candidate copy. Existing required checks remain required;
+failed checks, missing tooling, or missing execution evidence prevent approval.
+See [project tests](project-tests.md) and [browser verification](browser-verification.md).
 
-Continued tasks retain the original coding requirements. The review diff compares
-the candidate with its common ancestor with the source HEAD, so a no-change
-follow-up does not hide previously proposed changes in an empty latest-turn diff.
+Continued tasks retain the original requirements. The comparison uses the common
+ancestor with source HEAD, so a no-change follow-up does not hide earlier proposed
+changes. The reviewer uses `scratch/review.diff`, not host Git commit objects.
 
-Failed workspace reviews also save a visible chat report with the actual configured
-check output and exit code, even if the later API request fails. They never enable
-merge and are not retried during server restart.
-
-For this harness's standalone text-analyzer fixture, use project directory `.` and
-`python -m pytest --confcutdir=tests/fixtures/broken_repo tests/fixtures/broken_repo/test_text_stats.py -q`
-to avoid collecting the harness-wide parent conftest. A broad pytest invocation
-in an uninstalled src-layout checkout can fail to import its own package before
-reaching the fixture. Scoping collection does not fix bugs in the fixture tests;
-those remain visible as test failures.
+Failed reviews save a visible report with configured check output and exit status,
+even when a later API call fails. They never enable merge and are not retried on
+server restart.
 
 The saved report identifies both run IDs, the reviewed/base commits, source HEAD,
 configured command/directory, tool evidence, reviewer findings and merge outcome.
@@ -274,6 +263,15 @@ selects another config directory, and the `--agent` path must be inside it.
 
 ## Config editor
 
+Click **Edit profile** beside **Agent profile (config)** to load the selected file.
+**Validate** checks the draft, **Save** writes it, and **Cancel** discards it.
+**Save as new profile…** creates a copy; **Manage profile files** opens other files,
+a blank profile, or a file-list refresh.
+
+**Advanced run settings** contains the model override and execution mode;
+**Review settings** contains the paid reviewer and review scope. Both start
+collapsed. Opening either panel or editing a profile starts no inference.
+
 In the editor, choose a file and press Load or Reload, then edit the raw
 YAML or JSON. Validate before Save. You can create a new blank profile or
 clone the currently loaded draft to a new valid filename: the stem must be
@@ -337,7 +335,7 @@ config, request, and artifacts. Coding results expose the workspace and
 `diff_ref`; circuit results expose `exported_case` as unverified artifacts.
 Local build author traces use separate roots, documented in `Progress.md`.
 
-## Workspace sessions and bounded review loops
+## Workspace sessions and bounded loops
 
 Open a saved coding chat to see its **Workspace** panel: worktree, source repository,
 current attempt, container name/status, prior attempts, failures and trace locations.
@@ -348,13 +346,31 @@ persistent mode, the same compatible keeper. See [runtime data](runtime-data.md)
 Continuation carries the workspace's recorded execution mode into the controls;
 an explicit loop mode selection overrides that default.
 
-To automate local repair and verification:
+**Agent run limit — minutes** applies to ordinary profile tasks and each loop
+attempt. Leave it blank to inherit the selected profile; entering a whole number
+from 1 to 1,440 overrides only the submitted run, without saving the profile.
+The effective limit is frozen with the job. **Loop total budget — minutes** is a
+separate wall-clock allowance (default 60 minutes) covering attempts, preparation,
+and controller checks. Each stage is capped by the remaining total budget.
+Independent checks share the attempt's remaining time instead of resetting it.
+
+Choose **Loop until complete…** for local completion. It reuses the existing
+workspace and runs local attempts until the latest attempt publishes a candidate,
+the configured controller checks pass, and both attempt and check audits pass.
+The published candidate must belong to that exact run. Success displays
+**Complete — checks passed; not reviewer-approved.** Missing tests, unavailable
+dependencies, unaudited checks, or an unpublished/stale candidate cannot satisfy
+completion. Completion mode rejects paid authorization/reviewer settings; both
+review and advisory diagnosis entry points remain disabled, even if a restored
+state contains an allowance. It never automatically merges.
+
+Choose **Loop until approved…** for the separate reviewer-backed workflow:
 
 1. Select a local coding configuration and optional local model override. Select
    the desired execution mode; persistent preserves a compatible keeper across cycles.
 2. In the workspace panel choose **Loop until approved…**.
 3. Set limits. Defaults are **5 paid verification attempts**, 12 local iterations,
-   a 60-minute scheduling window and a 100,000 paid-token allowance. Paid attempts
+   a 60-minute total budget and a 100,000 paid-token allowance. Paid attempts
    can be set to 0 for local-only testing. A review attempt can include several
    provider requests/tool turns; the allowance counts reserved review jobs, not
    individual HTTP calls or confirmed invoice charges.
@@ -369,7 +385,14 @@ To automate local repair and verification:
    request, iterations continue locally. Passing then ends as
    **tests_passed_unverified**, not verifier approval. Merge remains separate.
 
-The loop panel shows current stage/run, attempt counters, outcome history and
+Completion loops expose outcomes **complete**, **blocked**, **stalled**,
+**interrupted**, or **budget_exhausted**. The last includes total-time and cycle
+limits; the reason distinguishes them. Older reviewer loops retain their existing
+`approved`, `tests_passed_unverified`, `time_limit`, `cycle_limit`, `local_stalled`,
+and `stopped` statuses.
+
+The loop panel shows current stage/run, cycle counters, recovery status, elapsed
+time, remaining budget, changed paths, final-attempt warnings, outcome history and
 measured native-local/OpenAI token usage, including captured responses before a
 stage finishes. Missing usage is marked partial. No dollar price is invented.
 The paid-token gate reserves conservative input plus maximum output before each
@@ -377,13 +400,34 @@ provider request. Unknown billing usage/outcomes disable further automatic paid
 calls. This is a token allowance, not a dollar billing guarantee.
 
 **Stop loop after current stage** prevents scheduling another stage. The current
-bounded stage may finish, including its authorized provider/tool turns. Scheduling
-time limits are checked between stages, with stage runtime limits also bounded;
-dependency preparation and cleanup may outlast the scheduling boundary. Repeated
-unchanged candidates/test outcomes stop the loop, as do local iteration limits.
-An interrupted controller that needs reconciliation blocks continuation.
+bounded stage may finish, including its authorized provider/tool turns. Completion
+loops record an owner stop as interrupted. No next stage starts. Loop controller
+subprocesses are capped by the per-stage and total wall-clock limits, including
+preflight and checks; a hard timeout may leave unknown effects that require
+reconciliation. It does not justify replaying the command. Repeated unchanged
+worktree/candidate states stop the loop, even when failure text varies; meaningful
+file or environment changes permit further bounded attempts. Cycle limits remain
+enforced. An interrupted controller that needs reconciliation blocks continuation.
 
-Loop state and frozen configs live in `phone/loops/<loop-id>/`. Each stage is an
+**Task history — n_last_chats**, beside the agent run limit, sets how many finished
+attempts to retain for this chat and workspace (default **8**, range **1–100**).
+Continuation keeps the first attempt plus the most recent `n_last_chats - 1`,
+ordered oldest to newest, without duplicates. For example, **4** keeps the first
+attempt and the latest three; **1** keeps only the first. Each retained attempt
+includes its recorded answer, errors, diagnostics and test results. Queued/running
+attempts are omitted. The original task is also retained separately. Each
+continuation and loop attempt collects this history before starting; loops keep
+the selected count for every attempt. Saved replies show the context used for
+that reply. Continuation also attaches unresolved checks,
+a short recovery plan and labelled host/sandbox Git context. **Previous task context attached**
+expands to show the submitted context, including on failed or timed-out replies
+that have no returned workspace result. Expand the agent reply first. Host-managed
+worktrees have Git history;
+sandbox project copies may lack it. Missing sandbox history is a diagnostic
+limitation, not proof that the host repository has no commits. Varying failures
+without measured source/environment changes are flagged as possible nondeterminism.
+
+Loop state, measured file snapshots and frozen configs live in `phone/loops/<loop-id>/`. Each stage is an
 ordinary browser job with its own trace. Authorization/start/stop and stage lineage
 are recorded in the ledger. On server restart running loops become **interrupted**;
 queued/running requests are not automatically replayed, including paid requests.
@@ -447,14 +491,24 @@ Previously stopped/stalled loops are not resumed by these changes.
 
 ## Editing an agent profile
 
-Click **Edit profile** beside **Agent profile (config)** to load the selected file.
-The panel shows the filename and YAML/JSON. **Validate** checks the draft, **Save**
-writes it, and **Cancel** discards the draft. **Save as new profile…** asks for a new
-filename; click **Save** to create the copy. **Manage profile files** offers other
-files, a blank profile and a file-list refresh. Existing-file saves retain conflict
-protection if another editor changes the file.
+Profile editing is described under [Config editor](#config-editor). This heading
+is retained for existing links.
 
-**Advanced run settings** groups the model override and execution mode.
-**Review settings** groups the optional paid reviewer and review scope. Both are
-collapsed initially. Opening settings or editing a profile does not start a model
-request; saved settings apply to subsequent runs.
+
+## Repeated command failures
+
+Run timelines show command argv, category, failure count, remaining unchanged
+retries, failing assertion evidence and whether files/environment changed. The
+controller distinguishes missing dependencies/executables, missing paths, test
+failures, unavailable Git history, timeouts and resource failures. See
+[run failure diagnosis](run-failure-diagnosis.md).
+
+Known missing dependencies block the identical command immediately. Other failing
+commands receive bounded reproduction retries (with the default identical-failure
+limit of three, two executions in one measured state), then are suppressed while
+the agent can read relevant files, edit, diagnose, or call Docker preparation.
+Successful introspection and unchanged writes do not erase the recorded failure.
+Changed project/helper contents or a selected prepared image permit another
+attempt. Repeated suppressed requests also consume a bounded recovery allowance;
+final-retry/recovery warnings precede a stalled stop. Existing model/tool/time
+limits still apply. A retry is permission to attempt a check, not proof of success.

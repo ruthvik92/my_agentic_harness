@@ -25,6 +25,72 @@ want its history instead. Noncoding snapshots are unchanged. Previously created
 snapshot workspaces remain snapshots; start a new coding task from a source
 project containing their files to obtain a workspace that supports continuation.
 
+## Where worktrees live and how Docker sees them
+
+The host harness creates workspace folders and runs Git to create the linked
+worktree before mounting the workspace into Docker. The default data root is
+`~/.local/share/local-agent`, so a coding workspace has this layout:
+
+```text
+~/.local/share/local-agent/sandboxes/ws_<id>/
+├── project/     # Linked Git worktree on agent/ws_<id>
+├── memory/
+├── tools/
+├── scratch/
+└── outputs/
+```
+
+`~/.local/share` follows the Linux convention for persistent application data.
+Git does not require this location. Keeping workspaces under the harness data
+root separates agent edits from the source checkout and groups each worktree
+with its supporting files. These folders survive container removal and host
+restarts; they are not temporary caches.
+
+The default is set in [cli.py](../src/local_agent/cli.py); it currently does not
+read `XDG_DATA_HOME`. Select another data root with the global option before the
+subcommand, for example:
+
+```bash
+uv run --locked local-agent --data-root /path/to/agent-data browser-web
+```
+
+This selects a different runtime state store; it does not migrate existing
+worktrees, chats, or evidence. The data root must be outside the imported source
+repository. Workspace allocation lives in
+[manager.py](../src/local_agent/workspace/manager.py), and host Git operations in
+[git.py](../src/local_agent/workspace/git.py).
+
+Docker receives one writable bind mount of the workspace at `/workspace`:
+
+| Host path relative to the data root | Container path |
+| --- | --- |
+| `sandboxes/ws_<id>/project/` | `/workspace/project/` |
+| `sandboxes/ws_<id>/memory/` | `/workspace/memory/` |
+| `sandboxes/ws_<id>/tools/` | `/workspace/tools/` |
+| `sandboxes/ws_<id>/scratch/` | `/workspace/scratch/` |
+| `sandboxes/ws_<id>/outputs/` | `/workspace/outputs/` |
+
+An edit to `/workspace/project/js/game.js` therefore changes the host worktree
+file directly. No copy-back step is needed. Container-local `/tmp` is separate;
+see [temporary files and persistence](executor.md#temporary-files-and-persistence).
+
+## Branch versus worktree: what stays unchanged until merge?
+
+A **branch** names a line of Git history; a **worktree** is a directory with files
+checked out from a branch. For example, the original project folder may have
+`main` checked out, while the agent's `project/` folder has `agent/ws_<id>` checked
+out. The original checkout can also be on a branch other than `main`.
+
+Agent edits stay in the managed worktree. Publishing a candidate commits those
+edits on the agent branch; review approval does not change the source checkout.
+A separate merge integrates the reviewed commit into the intended source branch.
+Existing uncommitted source edits are preserved, rather than made clean by the
+harness. The browser merge action requires a clean, unchanged source branch.
+
+The worktrees share Git objects and history, so the agent branch is visible from
+the original repository even before merge. Sharing history does not apply its
+file changes to the original checkout. See [review and merge](#review-and-merge).
+
 ## New tasks, continuation, and task directory
 
 In the browser, select `coder.yaml` and enter the repository root as the source:

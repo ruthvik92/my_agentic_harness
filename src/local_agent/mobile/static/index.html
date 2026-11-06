@@ -153,6 +153,14 @@
                 </div>
               </details>
             </section>
+            <label for="run-limit-minutes">Agent run limit — minutes</label>
+            <input id="run-limit-minutes" type="number" min="1" max="1440" step="1" placeholder="Use selected profile">
+            <p id="run-limit-default" class="model-run">Leave blank to inherit the selected profile. Applies to ordinary tasks and each loop attempt.</p>
+            <div id="task-history-fields" hidden>
+              <label for="n-last-chats">Task history — n_last_chats</label>
+              <input id="n-last-chats" type="number" min="1" max="100" step="1" value="8">
+              <p class="model-run">Keep the first finished attempt plus the latest n_last_chats − 1. Includes recorded results. Applies to continuations and each loop attempt; 1 keeps only the first.</p>
+            </div>
             <details id="advanced-run-settings"><summary>Advanced run settings</summary>
             <label for="model-select">Model override (optional)</label><select id="model-select"></select>
             <div id="legacy-circuit-controls" hidden>
@@ -257,14 +265,14 @@
         <div class="transcript" id="transcript"></div>
         <div id="workspace-sessions"></div>
         <section id="loop-config" hidden>
-          <h3>Local agent / verifier loop</h3>
+          <h3 id="loop-title">Local agent / verifier loop</h3>
           <p id="loop-workspace" class="model-run"></p>
           <label for="loop-paid">Maximum paid review/diagnosis attempts (default 5)</label><input id="loop-paid" type="number" min="0" max="20" value="5">
           <label for="loop-local">Maximum local iterations</label><input id="loop-local" type="number" min="1" max="100" value="12">
-          <label for="loop-minutes">Scheduling time limit (minutes)</label><input id="loop-minutes" type="number" min="1" max="1440" value="60">
+          <label for="loop-minutes">Loop total budget — minutes</label><input id="loop-minutes" type="number" min="1" max="1440" value="60">
           <label for="loop-tokens">Paid token allowance</label><input id="loop-tokens" type="number" min="1000" max="10000000" value="100000">
           <label><input id="loop-consent" type="checkbox"> Authorize paid reviews and one advisory failure diagnosis within these limits. API billing applies.</label>
-          <p class="model-run">Starts with a local iteration. After two failed local attempts, may use one authorized paid attempt for advisory diagnosis. Diagnosis cannot approve code. Stops early on verifier approval. After the paid allowance ends, continues locally until tests pass or a limit is reached. Scheduling limits are checked between bounded stages. Stop prevents the next stage; a current stage may finish. Merging is separate.</p>
+          <p id="loop-help" class="model-run">Starts with a local iteration. After two failed local attempts, may use one authorized paid attempt for advisory diagnosis. Diagnosis cannot approve code. Stops early on verifier approval. After the paid allowance ends, continues locally until tests pass or a limit is reached. The total budget caps attempts and checks. Stop prevents the next stage; a current stage may finish. Merging is separate.</p>
           <button type="button" id="loop-start">Start local / verifier loop</button>
           <button type="button" id="loop-dismiss">Cancel</button>
         </section>
@@ -522,34 +530,47 @@ async function refreshWorkspaceDetails() {
     });
   }catch(error){showError('Workspace details: '+error.message);}
 }
-function showLoopOptions(workspace) {
+function showLoopOptions(workspace, mode="approval") {
   if(currentJobId || submitting || navigating)return;
-  loopWorkspace=workspace;
+  loopWorkspace={...workspace, loopMode:mode};
+  const completion=mode==='completion';
+  document.getElementById('loop-title').textContent=completion?'Loop until complete — local only':'Loop until approved';
+  for(const id of ['loop-paid','loop-tokens','loop-consent']) {
+    const input=document.getElementById(id); input.hidden=completion;
+    const label=document.querySelector('label[for="'+id+'"]');if(label)label.hidden=completion;
+    if(id==='loop-consent')input.parentElement.hidden=completion;
+  }
+  document.getElementById('loop-start').textContent=completion?'Start local completion loop':'Start local / verifier loop';
+  document.getElementById('loop-help').textContent=completion?'Runs local attempts in this workspace until a published candidate, controller checks and audits pass. Diagnosis stays local. The total budget covers preparation, attempts and checks. Stop prevents the next stage. Merging is separate.':'Runs local attempts with explicitly authorized reviewer checks and optional advisory diagnosis. After the paid allowance ends, continues locally. The total budget covers all stages. Stop prevents the next stage. Merging is separate.';
   if(!document.getElementById('execution-mode').value && ['persistent','ephemeral'].includes(workspace.execution_mode)) document.getElementById('execution-mode').value=workspace.execution_mode;
   document.getElementById('loop-workspace').textContent='Workspace: '+workspace.workspace_id+' · '+workspace.git_workspace.worktree;
   document.getElementById('loop-consent').checked=false;
   document.getElementById('loop-config').hidden=false;
-  document.getElementById('loop-paid').focus();
+  document.getElementById(completion?'loop-local':'loop-paid').focus();
 }
 async function startLoop() {
   if(!paired || !loopWorkspace || currentJobId || submitting || navigating || uploading)return;
   if(ConfigControls.mode()!=='coding'){showError('Select a local coding configuration first.');return;}
-  const paid=Number(document.getElementById('loop-paid').value);
-  const consent=document.getElementById('loop-consent').checked;
+  const completion=loopWorkspace.loopMode==='completion';
+  const paid=completion?0:Number(document.getElementById('loop-paid').value);
+  const consent=completion?false:document.getElementById('loop-consent').checked;
   if(paid>0 && (!consent || !catalog?.verifier.enabled || !els['reviewer-select'].value)){
     showError('Choose an available paid reviewer and authorize the allowance, or set paid attempts to 0.');return;
   }
   submitting=true;busy(true);clearError();
   try{
     const request={workspace_id:loopWorkspace.workspace_id,profile_name:els['config-select'].value,
-      authorize_paid:consent,max_paid_reviews:paid,max_local_cycles:Number(document.getElementById('loop-local').value),
+      mode:completion?"completion":"approval",authorize_paid:consent,max_paid_reviews:paid,max_local_cycles:Number(document.getElementById('loop-local').value),
       timeout_seconds:Number(document.getElementById('loop-minutes').value)*60,
       paid_token_budget:Number(document.getElementById('loop-tokens').value)};
+    const runLimit=document.getElementById('run-limit-minutes').value;
+    if(runLimit!=='')request.run_limit_minutes=Number(runLimit);
+    request.n_last_chats=Number(document.getElementById('n-last-chats').value || 8);
     if(els['model-select'].value)request.model_id=els['model-select'].value;
     if(paid>0)request.reviewer_model_id=els['reviewer-select'].value;
     const mode=document.getElementById('execution-mode').value;if(mode)request.execution_mode=mode;
     const state=await api('/threads/'+currentThreadId+'/loops',request);
-    currentJobId=state.active_job_id;activeQuestion='Local / verifier loop';
+    currentJobId=state.active_job_id;activeQuestion=completion?'Local completion loop':'Local / verifier loop';
     storage.set('currentJobId',currentJobId);storage.set('activeQuestion',activeQuestion);
     document.getElementById('loop-config').hidden=true;
     await refreshLoops();poll();
@@ -566,11 +587,23 @@ async function refreshLoops() {
     for(const loop of Array.isArray(values)?values:[]){
       const make=(tag,text)=>{const n=document.createElement(tag);n.textContent=text || '';return n;};
       const panel=make('details');panel.open=!['approved','tests_passed_unverified','stopped'].includes(loop.status);
-      const label=loop.status==='tests_passed_unverified'?'Tests passed — latest changes not verifier-approved':loop.status;
+      const label=loop.status==='complete'?'Complete — checks passed; not reviewer-approved.':loop.status==='tests_passed_unverified'?'Tests passed — latest changes not verifier-approved':loop.status;
       panel.appendChild(make('summary','Loop: '+label+' · '+loop.workspace_id));
       const localOnly=loop.paid_disabled || loop.paid_attempts>=loop.limits.max_paid_reviews || loop.paid_tokens>=loop.limits.paid_token_budget;
       panel.appendChild(make('p','Stage: '+loop.stage+(localOnly?' · local-only':'')+' · local '+loop.local_attempts+'/'+loop.limits.max_local_cycles+' · paid '+loop.paid_attempts+'/'+loop.limits.max_paid_reviews));
+      if(loop.current_phase)panel.appendChild(make('p','Current stage: '+loop.current_phase));
+      if(loop.live_recovery)panel.appendChild(make('p','Recovery: '+loop.live_recovery.decision+' · '+loop.live_recovery.recoveries+' used'+(loop.live_recovery.warning?' · '+loop.live_recovery.warning:'')));
       if(loop.active_job_id)panel.appendChild(make('p','Current attempt: '+(loop.current_run_id || 'not created yet')+' · '+(loop.current_job_status || 'queued')));
+      const end=loop.ended || Date.now()/1000;
+      const elapsed=Math.max(0,end-loop.created),remaining=loop.status==='running'?Math.max(0,loop.deadline-Date.now()/1000):0;
+      panel.appendChild(make('p','Elapsed: '+Math.floor(elapsed/60)+'m '+Math.floor(elapsed%60)+'s · Remaining budget: '+Math.ceil(remaining/60)+'m · Attempt limit: '+(loop.run_timeout_seconds/60)+'m'));
+      if(loop.warning)panel.appendChild(make('p',loop.warning));
+      if(loop.changes_since_previous)panel.appendChild(make('p',loop.changes_since_previous));
+      if(loop.changed_paths?.length)panel.appendChild(make('pre','Changed paths since previous attempt: '+loop.changed_paths.join(', ')));
+      if(loop.recovery_status)panel.appendChild(make('p','Recovery status: '+loop.recovery_status));
+      if(loop.possible_nondeterminism)panel.appendChild(make('p','Possible nondeterminism: failures varied without source edits.'));
+      if(loop.recovery_plan)panel.appendChild(make('p','Recovery: '+loop.recovery_plan));
+      if(loop.completion_blocker)panel.appendChild(make('p','Unresolved: '+loop.completion_blocker));
       panel.appendChild(make('p',loop.reason));
       const usage=loop.live_usage || {};
       panel.appendChild(make('p','Measured tokens · local '+(usage.measured_local_total || 0)+' · verifier '+(usage.measured_openai_total || 0)+((usage.unknown_openai_requests || usage.unknown_local_usage)?' · partial':'')));
@@ -709,7 +742,7 @@ async function mergeWorkspaceReview(result) {
   } catch (error) { showError(error.message); }
   finally { submitting = false; busy(!!currentJobId || uploading); }
 }
-async function repairWorkspaceReview(result) {
+async function repairWorkspaceReview(result, additionalContext = '') {
   if (!paired || currentJobId || uploading || navigating || submitting || answerVotesPending.size) return;
   if (window.ConfigControls?.mode() !== 'coding' || !els['config-select'].value) {
     showError('Select a local coding configuration above, then click Fix with local model.'); return;
@@ -721,11 +754,15 @@ async function repairWorkspaceReview(result) {
       candidate_commit: result.workspace_review.target.candidate_commit,
       profile_name: els['config-select'].value
     };
+    if (additionalContext.trim()) request.additional_context = additionalContext.trim();
     if (els['model-select'].value) request.model_id = els['model-select'].value;
     const execution = document.getElementById('execution-mode').value;
     if (execution) request.execution_mode = execution;
+    const runtime = document.getElementById('run-limit-minutes').value;
+    if (runtime !== '') request.run_limit_minutes = Number(runtime);
     const job = await api('/threads/' + currentThreadId + '/repair-review', request);
-    currentJobId = job.job_id; activeQuestion = 'Fix the workspace review findings and rerun the tests.';
+    currentJobId = job.job_id; activeQuestion = 'Fix the workspace review findings and rerun the tests.' +
+      (additionalContext.trim() ? '\n\nAdditional repair context:\n' + additionalContext.trim() : '');
     storage.set('currentJobId', currentJobId); storage.set('activeQuestion', activeQuestion);
     poll();
   } catch (error) { showError(error.message); status('Local repair could not start.'); }

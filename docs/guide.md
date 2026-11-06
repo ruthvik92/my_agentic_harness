@@ -2,7 +2,7 @@
 
 This document describes the implemented harness. The original
 [build guide](history/local-agent-build-guide.md) explains the design and milestones;
-[the five-minute guide](tldr.md) provides the short operational introduction.
+[the CLI quick start](tldr.md) provides the short operational introduction.
 For high-level browser use and the task/review/repair lifecycle, read the
 [functional instruction manual](functional-manual.md).
 
@@ -90,10 +90,16 @@ and retains complete raw responses, optional thinking, token counts and duration
 The configured tag must match an installed model exactly. Ollama metadata can
 identify the installed model digest.
 
-The OpenAI adapter uses `/v1/chat/completions` and standard function tools.
-Assistant calls contain provider IDs and string JSON arguments; tool results
-include the corresponding `tool_call_id`. Exact serialized requests and raw
-responses remain evidence. Malformed argument JSON becomes a rejected proposal;
+The OpenAI adapter selects its transport from the endpoint, workflow, and tools.
+Official OpenAI workspace reviews and GPT-6 tool-enabled profiles use
+`/v1/responses`, preserving response items, reasoning state, and function-call
+results across stateless requests. Conversation-only requests and compatible
+local endpoints retain `/v1/chat/completions`. The exact selection rule is in
+[responses.py](../src/local_agent/models/responses.py).
+
+Chat Completions assistant calls contain provider IDs and string JSON arguments;
+tool results include the corresponding `tool_call_id`. Exact serialized requests
+and raw responses remain evidence. Malformed argument JSON becomes a rejected proposal;
 malformed envelopes, HTTP errors, refusal and incomplete/truncated completion
 statuses fail with retained raw response evidence. There are no hidden HTTP
 retries. A restart retry for a missing persisted response is explicit in the trace.
@@ -304,8 +310,8 @@ strict call normalization, provider IDs, exact context and policy/executor bindi
 
 ## Circuit analysis
 
-The `circuit` command reuses the same runtime with `analog-v1` instructions and
-multimodal input. [Circuit workflow documentation](circuits.md) covers PDF pages,
+The `circuit` command reuses the same runtime with the selected analog profile
+(the shipped profile uses `analog-v2`) and multimodal input. [Circuit workflow documentation](circuits.md) covers PDF pages,
 normalized crops, evidence provenance, vision model configuration, generated
 netlists and the review required before simulation.
 

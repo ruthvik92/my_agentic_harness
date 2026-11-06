@@ -1,155 +1,52 @@
 # Local agent harness
 
 A local harness for browser chat, coding tasks, and analog schematic investigation.
-The original design is preserved in [the historical build guide](docs/history/local-agent-build-guide.md).
-Native Ollama or OpenAI-compatible Chat Completions/Responses APIs perform inference. All generated commands, edits and helpers
-run in non-root, offline Docker containers. SQLite and immutable blobs retain
-inputs, decisions, execution outcomes and restart evidence.
+Models propose work; the host controller runs tools in Docker and records requests,
+results, checks, and review evidence. Coding uses separate Git worktrees so your
+source checkout and pending edits are preserved. Review and merge are separate actions.
 
-Start with the **[functional instruction manual](docs/functional-manual.md)** for
-the end-to-end browser workflow: new tasks versus continuation, workspace and
-commit identity, previews, local repairs, paid review, and merging.
+## Start here
 
-| Workflow | Active profile | Guide |
-|---|---|---|
-| Browser access and screenshots | `config/browser.yaml` | [Browser](docs/browser.md) |
-| Analog circuit investigation | `config/analog.yaml` | [Circuits](docs/circuits.md) |
-| Coding tasks | `config/coder.yaml` | [Quick start](docs/tldr.md) |
+| I want to… | Read |
+| --- | --- |
+| Use the browser to build, continue, review, and merge a project | [User manual](docs/functional-manual.md) |
+| Install the harness and run a first CLI task | [Quick start](docs/tldr.md) |
+| Understand runs, workspaces, candidates, and verification | [Key concepts](docs/key-concepts.md) |
+| Understand harness characteristics, implementation, and local/paid work allocation | [Harness characteristics](docs/harness-characteristics.md) |
+| Know what a paid reviewer receives and how context is billed | [Reviews and data sent to models](docs/reviews.md) |
+| Find a setting, command, troubleshooting guide, or source explanation | [Documentation index](docs/README.md) |
 
-Start `./browser` to select any of these profiles through the paired web interface.
+## Launch
+
+From this repository, after installing UV, Docker, and an Ollama model matching
+`config/coder.yaml`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 uv sync --locked
 uv run --locked local-agent build-sandbox
 uv run --locked local-agent doctor
-uv run --locked local-agent run --agent config/coder.yaml \
-  --repo tests/fixtures/broken_repo --task-file tests/fixtures/task.md --verify-fixture
+./browser
 ```
 
-The configured model is `qwen3:30b-a3b-instruct-2507-q8_0`; install that exact tag
-in your local Ollama server first. The sandbox build provisions dependencies and
-pins an immutable image ID in `config/sandbox.json`. Rebuild after changing its
-trusted worker or protected verifier. Docker needs cgroup v2, seccomp, and working
-CPU/memory/swap/PID limits; the CLI does not weaken these requirements.
+The browser defaults to **http://127.0.0.1:8767**. Use the pairing code printed in
+the terminal. For another device on your network, see [browser setup](docs/browser.md#starting-the-server).
+`doctor` includes model capability checks; it can warm the selected model.
+For command-line tasks, follow the [quick start](docs/tldr.md#get-a-first-run).
 
-For a Git repository root, coding runs create an `agent/ws_<id>` branch and linked
-host worktree from committed `HEAD`. Pending edits in your existing checkout are
-preserved and excluded. Coding directories without a repository are initialized
-before creating a managed worktree; noncoding workflows use copied projects. Docker tools edit
-the candidate; its final diff is recorded against a protected baseline and the
-host publishes a candidate commit. Your source checkout is not switched or merged.
-See [Git workspaces](docs/git-workspaces.md) for browser cards and review commands.
-A general task ends
-`completed_unverified`; the supplied calculator, mean and clamp fixtures can earn
-`verified` through protected tests in a fresh workspace.
+## Where work runs and lives
 
-```bash
-uv run --locked local-agent trace-web
-uv run --locked local-agent trace RUN_ID
-uv run --locked local-agent trace RUN_ID --json --evidence
-uv run --locked local-agent audit RUN_ID
-uv run --locked local-agent replay RUN_ID --recorded-only
-uv run --locked local-agent report RUN_ID
-uv run --locked local-agent resume RUN_ID
-uv run --locked local-agent cancel RUN_ID
-uv run --locked local-agent export-events RUN_ID
-uv run --locked local-agent evaluate --windows 8192 16384 --rounds 1
-```
+- **Inference:** native Ollama or the configured OpenAI-compatible endpoint.
+  Hosted inference sends selected context to that service; see [review data](docs/reviews.md).
+- **Tools:** non-root Docker containers, normally offline. Authorized environment
+  preparation is a separate provisioning step. See [execution](docs/executor.md)
+  and [environment preparation](docs/environment-preparation.md).
+- **Evidence:** SQLite and immutable blobs under `~/.local/share/local-agent` by
+  default. Set `--data-root PATH` before the CLI subcommand to select another root.
+  See [runtime data](docs/runtime-data.md).
+- **Inspection:** `./traces` starts the read-only trace viewer, normally on
+  **http://127.0.0.1:8765**. See [traces and outcomes](docs/traces.md).
 
-Open **http://127.0.0.1:8765** after starting `trace-web` to browse run timelines,
-audit them and follow evidence references. The viewer is local and read-only.
-See [how to interpret runs and traces](docs/traces.md) for field definitions,
-evidence navigation, tool lifecycles and run statuses.
-
-For a shorter startup command, run `./traces` from this directory. It finds UV
-on your PATH or in `~/.local/bin`, selects the harness directory, and starts the
-viewer. Keep the terminal running; press Ctrl+C to stop. Use
-`./traces --port 8766` to choose another port. You can also launch it from anywhere
-using `/home/ruthvik/my_agentic_harness/traces`.
-
-Use `--agent examples/configs/openai-local.yaml` to test the OpenAI-compatible interface
-against local Ollama. For hosted OpenAI, configure its HTTPS base URL, exact model
-ID and API-key environment variable as described in the
-[detailed guide](docs/guide.md#model-providers). Credentials stay outside YAML and
-sandbox containers; hosted inference sends context to the configured service.
-
-Replace `RUN_ID` with the returned ID. Trace/audit/replay/report use read-only
-SQLite. Recorded replay consumes saved provider/tool responses and state
-transitions, without live inference or tools. `resume` continues a nonterminal
-live run after reconciliation. An uncertain mutation stops in
-`needs_reconciliation` and is never silently repeated.
-
-See [Finding runtime data](docs/runtime-data.md) for the chat/job/run/workspace
-mapping, Docker reuse limits, and the purpose of other `local-agent-*` folders.
-
-State defaults to `~/.local/share/local-agent` on a local filesystem. Supply
-`--data-root /path/to/private-state` **before** the command to change it. Working
-repositories, memory, helper metadata and outputs are untrusted data. Protected
-control records are never mounted into Docker. Workspace disk limits are a soft
-monitor; they are not a filesystem quota. Run evidence has a 1 GiB cap and each
-captured command output/blob has a 10 MiB cap.
-
-```bash
-uv run --locked local-agent export RUN_ID --output /path/to/new-metadata-bundle
-uv run --locked local-agent export RUN_ID --output /path/to/new-private-bundle --include-evidence
-uv run --locked local-agent backup --output /path/to/new-private-backup
-uv run --locked local-agent verify-bundle /path/to/bundle
-```
-
-Exports omit payloads by default. `--include-evidence` explicitly includes private
-source/prompt/output evidence and a single-run SQLite snapshot for audit/replay.
-Backups use SQLite's online backup API and include the complete ledger and blob
-store. These bundles preserve evidence, not mutable workspaces or Docker state;
-restoring them supports inspection/replay, not automatic continuation.
-
-```bash
-uv run --locked pytest -q
-uv run --locked pytest -q --docker-image IMAGE_ID_FROM_CONFIG
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-```
-
-Without an explicit image, Docker acceptance tests are skipped and reported as
-such. Fixture tests are deliberately broken and excluded from harness discovery.
-`simulate` remains available for a fully scripted, mock-only trace demonstration.
-
-Start with [the five-minute TLDR](docs/tldr.md) or [the detailed guide](docs/guide.md).
-
-See [progress and gotchas](Progress.md), [architecture](docs/architecture.md),
-[executor modes, cleanup, and isolation](docs/executor.md), [context and helpers](docs/context-helpers.md),
-[operating procedures](docs/operations.md) and [evaluation results](docs/evaluation-results.md).
-
-For service-manual schematics, use the [circuit workflow](docs/circuits.md) to
-extract high-resolution PDF images and create an explanation and draft netlist.
-
-Use the browser interface from any device on the home network with
-`./browser --host 192.168.0.40` (use your computer's LAN IP; omit `--host` for
-localhost only). Open the printed URL, enter the terminal pairing code, then
-select any valid config profile to run. You can also create and edit config
-profiles directly in the browser. Coding tasks require an explicit workspace,
-and circuit tasks require a PDF. See the [browser interface guide](docs/browser.md)
-and the [config guide](docs/configs.md) for setup and profile details. Saved
-image memory, chat history, review and feedback traces remain available.
-Browser authentication uses terminal pairing, not OAuth; paired devices share
-one local owner profile.
-
-The shipped coding profile now runs automatic controller tests with reproducible
-Python project setup. Workspace reviewers share the same Auto test plan, and the
-browser shows live measured token totals. See [project testing](docs/project-tests.md).
-
-Coding models can inspect their environment and request missing runtimes,
-packages, and headless browser tooling. Preparation is recorded separately;
-coding, tests, and workspace review use the selected offline Docker image.
-See [model-requested environments](docs/environment-preparation.md).
-
-Docker execution defaults to ephemeral containers. Tool-enabled profiles can opt into
-workspace-owned persistent sessions with a 30-minute idle timeout; see
-[execution configuration and traces](docs/executor.md).
-
-Repository organization: `config/` contains the three active browser, analog,
-and coding profiles plus sandbox metadata. Optional configs are in
-[examples/configs](examples/configs/README.md); personal circuit investigations
-and development snapshots live outside the checkout. See the
-[documentation index](docs/README.md) and [repository layout](docs/repository-layout.md)
-for current paths, the preserved investigation, and backup recovery.
+For development, see the [implementation guide](docs/guide.md#development-and-checks).
+[Progress.md](Progress.md) records work and validation; [development history](docs/history/README.md)
+preserves earlier plans and investigations. Neither replaces current operating instructions.

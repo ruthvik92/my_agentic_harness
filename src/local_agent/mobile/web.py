@@ -160,7 +160,7 @@ class BrowserServer(ThreadingHTTPServer):
                 from local_agent.circuits.agent import read_evidence
 
                 progress = json.loads(read_evidence(self.jobs.directory, original["job_id"] + "/progress.json", 4096))
-                job = {**original, "run_id":progress["run_id"]}
+                job = {**original, "run_id":progress["run_id"], "phase": progress.get("phase"), "live_recovery": progress.get("recovery")}
                 job["token_usage"] = job_usage(self.root,job,job.get("usage_baseline_model",DEFAULT_BASELINE))
                 jobs[index] = job
             except (OSError, ValueError, KeyError):
@@ -236,6 +236,8 @@ class BrowserServer(ThreadingHTTPServer):
                     "error",
                     "loop_id",
                     "loop_stage",
+                    "task_context",
+                    "run_timeout_seconds",
                 ):
                     if field in job:
                         frozen_fields[field] = job[field]

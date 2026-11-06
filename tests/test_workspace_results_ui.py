@@ -14,6 +14,7 @@ import pytest
     ("browser_navigation_check.js", "index.html"),
     ("workspace_reviews_check.js", "workspace-reviews.js"),
     ("browser_loop_controls_check.js", "index.html"),
+    ("browser_completion_controls_check.js", "index.html"),
 ])
 def test_workspace_results_widget(script, asset):
     gjs = shutil.which("gjs")
